@@ -1,0 +1,2 @@
+The framework supports hybrid retrieval using dense and sparse methods.
+It is designed for research and controlled experimentation.

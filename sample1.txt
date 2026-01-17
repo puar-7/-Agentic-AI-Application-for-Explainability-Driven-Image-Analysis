@@ -1,0 +1,2 @@
+This document describes the objective of the system.
+The goal is to build a modular agentic framework using LangGraph.
