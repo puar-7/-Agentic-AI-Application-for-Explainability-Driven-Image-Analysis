@@ -42,6 +42,30 @@ class DocumentStore:
         self.bm25 = None
         self.bm25_documents = []
 
+
+    def add_documents(self, new_documents):
+        """
+        Append new documents to existing FAISS + BM25 indexes.
+        """
+        if self.vector_store is None or self.bm25 is None:
+            raise RuntimeError("Indexes must be loaded before appending.")
+
+        # Chunk only NEW documents
+        new_chunks = self.chunk_documents(new_documents)
+
+        if not new_chunks:
+            return
+
+        # ---- Dense: FAISS append ----
+        self.vector_store.add_documents(new_chunks)
+
+        # ---- Sparse: extend corpus + rebuild BM25 ----
+        self.bm25_documents.extend(new_chunks)
+        tokenized_corpus = [
+            doc.page_content.lower().split()
+            for doc in self.bm25_documents
+        ]
+        self.bm25 = BM25Okapi(tokenized_corpus)
     # ------------------------------------------------------------------
     # Document Loading
     # ------------------------------------------------------------------
