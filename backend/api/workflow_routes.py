@@ -27,6 +27,12 @@ def run_workflow(request: WorkflowRequest):
     graph = WorkflowGraph()
     result = graph.run(state)
 
+    # --------------------------------------------------
+    # Persistence Slot 
+    # --------------------------------------------------
+    
+
+
     if result.get("error"):
         raise HTTPException(
             status_code=400,
