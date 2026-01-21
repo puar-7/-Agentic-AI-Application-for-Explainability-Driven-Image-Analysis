@@ -7,7 +7,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 from rank_bm25 import BM25Okapi
-
+import pickle
 
 class DocumentStore:
     """
@@ -111,6 +111,24 @@ class DocumentStore:
         ]
         self.bm25 = BM25Okapi(tokenized_corpus)
 
+
+    def save(self, path: str):
+        with open(path, "wb") as f:
+            pickle.dump({
+                "vector_store": self.vector_store,
+                "bm25": self.bm25,
+                "bm25_documents": self.bm25_documents
+            }, f)
+    @classmethod
+    def load(cls, path: str):
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+
+        store = cls()
+        store.vector_store = data["vector_store"]
+        store.bm25 = data["bm25"]
+        store.bm25_documents = data["bm25_documents"]
+        return store        
     # ------------------------------------------------------------------
     # Hybrid Retrieval
     # ------------------------------------------------------------------
