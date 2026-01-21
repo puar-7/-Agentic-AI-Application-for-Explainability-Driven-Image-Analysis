@@ -1,7 +1,5 @@
 import streamlit as st
-
-from backend.graph.workflow_graph import WorkflowGraph
-from backend.graph.state import GraphState
+from ui.shared import post_json
 
 
 def render_workflow_ui():
@@ -46,30 +44,25 @@ def render_workflow_ui():
         return
 
     # -----------------------------
-    # Build initial state
-    # -----------------------------
-    state = GraphState(
-        mode="workflow",
-        user_message=workflow_input_text
-    )
-
-    workflow_graph = WorkflowGraph()
-
-    # -----------------------------
-    # Execute workflow
+    # Execute workflow via backend
     # -----------------------------
     with st.spinner("Running workflow..."):
-        try:
-            final_state = workflow_graph.run(state)
-        except Exception as e:
-            st.error(f"Workflow execution failed: {e}")
-            return
+        resp = post_json(
+            "/workflow",
+            {"config_text": workflow_input_text}
+        )
+
+    if not resp.ok:
+        st.error(resp.text)
+        return
+
+    result = resp.json()
 
     # -----------------------------
     # Error handling
     # -----------------------------
-    if final_state.get("error"):
-        st.error(final_state["error"])
+    if result.get("error"):
+        st.error(result["error"])
         return
 
     # -----------------------------
@@ -78,21 +71,21 @@ def render_workflow_ui():
     st.success("Workflow completed successfully.")
 
     # White-box result
-    if final_state.get("white_box_result"):
+    if result.get("white_box_result"):
         with st.expander("🔍 White-box Analysis", expanded=True):
-            st.json(final_state["white_box_result"])
+            st.json(result["white_box_result"])
 
     # Black-box result
-    if final_state.get("black_box_result"):
+    if result.get("black_box_result"):
         with st.expander("📦 Black-box Analysis", expanded=True):
-            st.json(final_state["black_box_result"])
+            st.json(result["black_box_result"])
 
     # Report
-    if final_state.get("report"):
+    if result.get("report"):
         with st.expander("📝 Workflow Report", expanded=True):
-            st.json(final_state["report"])
+            st.json(result["report"])
 
     # Evaluation
-    if final_state.get("evaluation"):
+    if result.get("evaluation"):
         with st.expander("📊 Evaluation Summary", expanded=True):
-            st.json(final_state["evaluation"])
+            st.json(result["evaluation"])

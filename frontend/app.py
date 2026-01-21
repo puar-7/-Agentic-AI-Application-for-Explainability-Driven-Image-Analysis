@@ -1,9 +1,6 @@
-import sys
+
 import streamlit as st
 from pathlib import Path
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT_DIR))
 
 from ui.chat_ui import render_chat_ui
 from ui.workflow_ui import render_workflow_ui
@@ -24,8 +21,6 @@ st.title("🧠 Agentic Framework")
 if "mode" not in st.session_state:
     st.session_state.mode = "chat"
 
-if "document_store" not in st.session_state:
-    st.session_state.document_store = None
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
