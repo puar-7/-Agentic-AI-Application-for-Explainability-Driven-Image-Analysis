@@ -24,9 +24,9 @@ def build_execution_snapshot(
             "parsed": parsed_input
         },
         "nodes": {
-            "router": final_state.get("router"),
-            "white_box": final_state.get("white_box"),
-            "black_box": final_state.get("black_box"),
+            "router": final_state.get("route"),
+            "white_box": final_state.get("white_box_result"),
+            "black_box": final_state.get("black_box_result"),
             "report": final_state.get("report"),
             "evaluation": final_state.get("evaluation"),
         },

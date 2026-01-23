@@ -83,7 +83,14 @@ def render_workflow_ui():
     # Report
     if result.get("report"):
         with st.expander("📝 Workflow Report", expanded=True):
-            st.json(result["report"])
+            report_content = result["report"]
+            
+            if "human_readable" in report_content:
+                # Render as rich text (Markdown)
+                st.markdown(report_content["human_readable"])
+            else:
+                # Fallback: If format is different, show raw data
+                st.json(report_content)
 
     # Evaluation
     if result.get("evaluation"):

@@ -81,15 +81,7 @@ class ReportGenerationNode:
         # For now: store full text as human-readable
         # Sections can be parsed later when structure stabilizes
         state.report = {
-            "human_readable": response.content,
-            "sections": {
-                "overview": "",
-                "configuration_summary": "",
-                "execution_path": "",
-                "analysis_results": "",
-                "limitations": "",
-                "conclusion": "",
-            },
+            "human_readable": response.content
         }
 
         return state
