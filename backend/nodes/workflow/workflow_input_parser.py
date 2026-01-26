@@ -6,7 +6,7 @@ from typing import Dict
 
 from backend.graph.state import GraphState
 from backend.schemas.workflow_input import WorkflowInput
-
+import os
 
 class WorkflowInputParserNode:
     """
@@ -43,6 +43,23 @@ class WorkflowInputParserNode:
                     "chat_response": f"Workflow configuration error: {msg}"
                 }
             extracted[field] = match.group(1).strip()
+
+
+        # Check if dataset file exists
+        if not os.path.exists(extracted["dataset_path"]):
+            msg = f"Dataset file not found at: {extracted['dataset_path']}"
+            return {
+                "error": msg,
+                "chat_response": f"File Error: {msg}"
+            }
+
+        # Check if model file exists
+        if not os.path.exists(extracted["model_path"]):
+            msg = f"Model file not found at: {extracted['model_path']}"
+            return {
+                "error": msg,
+                "chat_response": f"File Error: {msg}"
+            }    
 
         execution_mode = extracted["execution_mode"].lower()
         if execution_mode not in self.ALLOWED_EXECUTION_MODES:
