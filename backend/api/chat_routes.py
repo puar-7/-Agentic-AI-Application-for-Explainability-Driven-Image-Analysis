@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import os
-
+from fastapi import Request
 from backend.services.document_store import DocumentStore
 from backend.graph.chat_graph import ChatGraph
 from backend.graph.state import GraphState
@@ -20,29 +20,16 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/")
-def chat(request: ChatRequest):
-    if not os.path.exists(INDEX_PATH):
-        raise HTTPException(
-            status_code=400,
-            detail="No index found. Please upload documents first."
-        )
-
-    store = DocumentStore.load(INDEX_PATH)
-
-    retriever = LocalRetrieverNode(store)
-    llm = get_chat_llm()
-    chat_node = ChatLLMNode(llm)
-
-    chat_graph = ChatGraph(
-        retriever_node=retriever,
-        chat_llm_node=chat_node
-    )
+@router.post("/")
+def chat(request: ChatRequest, http_request: Request): # Add http_request
+    # Use the global unified graph
+    unified_graph = http_request.app.state.unified_graph
 
     state = GraphState(
-        mode="chat",
+        mode="chat", # This triggers the "chat" path in the unified graph
         user_message=request.query
     )
 
-    final_state = chat_graph.run(state)
+    final_state = unified_graph.run(state)
 
     return {"answer": final_state.chat_response}

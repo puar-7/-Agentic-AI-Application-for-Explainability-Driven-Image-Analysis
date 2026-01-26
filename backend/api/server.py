@@ -7,6 +7,15 @@ from backend.api.upload_routes import router as upload_router
 from backend.api.clear_routes import router as clear_router
 from backend.db.mongo import MongoDB
 
+from backend.services.document_store import DocumentStore
+from backend.nodes.chat.local_retriever_node import LocalRetrieverNode
+from backend.nodes.chat.chat_llm_node import ChatLLMNode
+from backend.llm.hf_client import get_chat_llm
+from backend.graph.unified_graph import UnifiedGraph # Import the new graph
+import os
+
+INDEX_PATH = "backend/storage/index/index.pkl"
+
 app = FastAPI(
     title="Agentic Framework Backend",
     version="0.1.0"
@@ -20,6 +29,26 @@ mongodb = MongoDB(
 def startup_event():
     mongodb.connect()
     app.state.mongodb = mongodb
+
+    # 2. Load Index ONCE (Performance Fix)
+    if os.path.exists(INDEX_PATH):
+        print("Loading Document Store...")
+        store = DocumentStore.load(INDEX_PATH)
+    else:
+        print("No index found. Initializing empty store.")
+        store = DocumentStore() # You might need to handle empty store logic
+    
+    # 3. Initialize Nodes
+    retriever = LocalRetrieverNode(store)
+    llm = get_chat_llm()
+    chat_node = ChatLLMNode(llm)
+
+    # 4. Initialize Unified Graph ONCE
+    app.state.unified_graph = UnifiedGraph(
+        retriever_node=retriever,
+        chat_llm_node=chat_node
+    )
+    print("Unified Graph initialized successfully.")
 
 # Register routes
 

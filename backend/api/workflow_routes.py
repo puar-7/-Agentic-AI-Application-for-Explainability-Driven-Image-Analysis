@@ -35,6 +35,7 @@ def make_json_safe(obj):
 
 @router.post("/")
 def run_workflow(request: WorkflowRequest, http_request: Request):
+    unified_graph = http_request.app.state.unified_graph
     if not request.config_text.strip():
         raise HTTPException(
             status_code=400,
@@ -46,8 +47,12 @@ def run_workflow(request: WorkflowRequest, http_request: Request):
         user_message=request.config_text
     )
 
-    graph = WorkflowGraph()
-    result = graph.run(state)
+
+
+    result = unified_graph.run(state)
+    if isinstance(result, GraphState):
+         # If run() returns GraphState object, convert to dict for your existing logic
+         result = result.dict()
 
     # --------------------------------------------------
     # Persistence Slot 
