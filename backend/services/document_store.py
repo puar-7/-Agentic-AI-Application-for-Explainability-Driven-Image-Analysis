@@ -192,3 +192,11 @@ class DocumentStore:
         }
 
         return list(combined.values())
+    def reset(self):
+        """
+        Clears the in-memory state of the store.
+        """
+        self.vector_store = None
+        self.bm25 = None
+        self.bm25_documents = []
+        print("[DocumentStore] In-memory index has been reset.")

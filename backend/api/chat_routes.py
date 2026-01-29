@@ -32,4 +32,13 @@ def chat(request: ChatRequest, http_request: Request): # Add http_request
 
     final_state = unified_graph.run(state)
 
-    return {"answer": final_state.chat_response}
+    return {
+    "answer": final_state.chat_response,
+    "sources": [
+        {
+            "content": doc.page_content,
+            "metadata": doc.metadata
+        }
+        for doc in (final_state.retrieved_docs or [])
+    ]
+}

@@ -37,7 +37,7 @@ def startup_event():
     else:
         print("No index found. Initializing empty store.")
         store = DocumentStore() # You might need to handle empty store logic
-    
+    app.state.document_store = store
     # 3. Initialize Nodes
     retriever = LocalRetrieverNode(store)
     llm = get_chat_llm()

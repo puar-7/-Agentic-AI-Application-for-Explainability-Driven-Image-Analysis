@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Request
 import os
 import shutil
 from typing import List
@@ -26,7 +26,7 @@ def save_metadata(metadata: dict):
         json.dump(metadata, f, indent=2)
 
 @router.post("/upload-docs")
-def upload_docs(files: List[UploadFile] = File(...)):
+def upload_docs(request: Request, files: List[UploadFile] = File(...)):
     # ---------- Load metadata ----------
     metadata = load_metadata()
     indexed = {
@@ -62,17 +62,19 @@ def upload_docs(files: List[UploadFile] = File(...)):
         }
 
     # ---------- Index logic ----------
-    if os.path.exists(INDEX_PATH):
-        # Incremental append
-        store = DocumentStore.load(INDEX_PATH)
-        new_docs = store.load_documents(new_file_paths)
-        store.add_documents(new_docs)
-    else:
-        # Cold start
-        store = DocumentStore()
-        docs = store.load_documents(new_file_paths)
-        store.build_indexes(docs)
+    store = request.app.state.document_store
+    new_docs = store.load_documents(new_file_paths)
 
+
+    if store.vector_store is None:
+        # Cold start for the live object
+        store.build_indexes(new_docs)
+    else:
+        # Incremental append
+        store.add_documents(new_docs)
+
+
+    
     # ---------- Persist ----------
     store.save(INDEX_PATH)
     metadata["indexed_files"].extend(new_metadata_entries)

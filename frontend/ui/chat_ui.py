@@ -69,9 +69,18 @@ def render_chat_ui():
             resp = post_json("/chat", {"query": user_query})
 
         if resp.ok:
-            answer = resp.json()["answer"]
+            data = resp.json()
+
+            answer = data.get("answer", "")
+            sources = data.get("sources", [])
+
             st.chat_message("assistant").write(answer)
             st.session_state.chat_history.append(("assistant", answer))
-        else:
-            error_msg = resp.json().get("detail", resp.text)
-            st.error(error_msg)
+
+            # Show retrieved local context (sources)
+            if sources:
+                with st.expander("📄 Retrieved context"):
+                    for i, src in enumerate(sources, 1):
+                        st.markdown(f"**Chunk {i}:**")
+                        st.write(src.get("content", ""))
+                        st.divider()

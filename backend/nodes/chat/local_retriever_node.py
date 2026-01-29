@@ -32,6 +32,14 @@ class LocalRetrieverNode:
         print("[LocalRetrieverNode] Retrieving documents for query:")
         print(f"  → {query}")
 
+        if (
+        self.document_store.vector_store is None
+        or self.document_store.bm25 is None
+        ):
+            print("[LocalRetrieverNode] No indexes found. Skipping retrieval.")
+            return {
+                "retrieved_docs": []
+            }
         retrieved_docs = self.document_store.hybrid_retrieve(query)
 
         print(f"[LocalRetrieverNode] Retrieved {len(retrieved_docs)} document chunks")
