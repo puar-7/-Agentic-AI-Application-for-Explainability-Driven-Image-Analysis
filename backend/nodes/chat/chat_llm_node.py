@@ -34,35 +34,35 @@ class ChatLLMNode:
             - state.chat_response
         """
 
-        if not state.user_message:
-            raise ValueError("No user_message found in GraphState.")
+        context = ""
+        if state.retrieved_docs:
+            context = self._build_context(state.retrieved_docs)
 
-        if not state.retrieved_docs:
-            print("[ChatLLMNode] No retrieved documents found.")
-            return {
-                "chat_response": "No relevant local context found to answer your question."
-            }
-
-        print("[ChatLLMNode] Generating response from local context")
-
-        context = self._build_context(state.retrieved_docs)
-
+        # 2. Flexible System Prompt
+        # This tells the LLM: "Here is some info, but ignore it if the user is just saying hi."
         system_prompt = (
-            "You are an assistant that answers questions strictly "
-            "using the provided context. "
-            "If the answer is not present in the context, say you do not know."
+            "You are a helpful AI assistant designed to answer questions about the user's documents. "
+            "You have been provided with context information below. "
+            "\n\n"
+            "INSTRUCTIONS:\n"
+            "1. If the user's message is a greeting (e.g., 'Hello', 'Hi'), respond naturally and politely without using the context.\n"
+            "2. If the user's message matches the context, use the context to answer accurately.\n"
+            "3. If the answer is NOT in the context, strictly state that you do not know based on the documents. "
+            "Do not hallucinate technical details."
         )
 
+        # 3. Construct the message payload
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(
                 content=(
                     f"Context:\n{context}\n\n"
-                    f"Question:\n{state.user_message}"
+                    f"User Message:\n{state.user_message}"
                 )
             )
         ]
 
+        # 4. Invoke LLM
         response = self.llm.invoke(messages)
 
         return {

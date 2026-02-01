@@ -7,7 +7,7 @@ from backend.nodes.workflow.white_box_node import WhiteBoxNode
 from backend.nodes.workflow.black_box_node import BlackBoxNode
 from backend.nodes.workflow.parallel_node import ParallelExecutionNode
 from backend.nodes.workflow.report_generation_node import ReportGenerationNode
-from backend.nodes.workflow.evaluation_node import EvaluationNode
+
 
 
 class WorkflowGraph:
@@ -24,7 +24,7 @@ class WorkflowGraph:
         graph.add_node("white_box", WhiteBoxNode())
         graph.add_node("black_box", BlackBoxNode())
         graph.add_node("report", ReportGenerationNode())
-        graph.add_node("evaluation", EvaluationNode())
+        
 
         # Entry
         graph.set_entry_point("parse_input")
@@ -60,8 +60,8 @@ class WorkflowGraph:
         graph.add_edge("black_box", "report")
 
         # Finalization
-        graph.add_edge("report", "evaluation")
-        graph.add_edge("evaluation", END)
+        graph.add_edge("report", END)
+        
 
         return graph.compile()
 

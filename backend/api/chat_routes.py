@@ -9,7 +9,6 @@ from backend.nodes.chat.local_retriever_node import LocalRetrieverNode
 from backend.nodes.chat.chat_llm_node import ChatLLMNode
 from backend.llm.hf_client import get_chat_llm
 
-# ✅ THIS LINE WAS MISSING
 router = APIRouter()
 
 INDEX_PATH = "backend/storage/index/index.pkl"

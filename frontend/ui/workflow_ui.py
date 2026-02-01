@@ -92,7 +92,4 @@ def render_workflow_ui():
                 # Fallback: If format is different, show raw data
                 st.json(report_content)
 
-    # Evaluation
-    if result.get("evaluation"):
-        with st.expander("📊 Evaluation Summary", expanded=True):
-            st.json(result["evaluation"])
+    
