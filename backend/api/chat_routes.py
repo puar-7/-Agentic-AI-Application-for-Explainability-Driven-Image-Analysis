@@ -8,7 +8,7 @@ from backend.graph.state import GraphState
 from backend.nodes.chat.local_retriever_node import LocalRetrieverNode
 from backend.nodes.chat.chat_llm_node import ChatLLMNode
 from backend.llm.hf_client import get_chat_llm
-
+from typing import List, Dict, Any
 router = APIRouter()
 
 INDEX_PATH = "backend/storage/index/index.pkl"
@@ -16,9 +16,9 @@ INDEX_PATH = "backend/storage/index/index.pkl"
 
 class ChatRequest(BaseModel):
     query: str
+    history: List[Dict[str, str]] = [] # <--- Added History Field with default empty list
 
 
-@router.post("/")
 @router.post("/")
 def chat(request: ChatRequest, http_request: Request): # Add http_request
     # Use the global unified graph
@@ -26,7 +26,8 @@ def chat(request: ChatRequest, http_request: Request): # Add http_request
 
     state = GraphState(
         mode="chat", # This triggers the "chat" path in the unified graph
-        user_message=request.query
+        user_message=request.query,
+        chat_history=request.history  # Pass chat history to the state
     )
 
     final_state = unified_graph.run(state)

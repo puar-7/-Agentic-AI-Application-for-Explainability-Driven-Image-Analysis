@@ -66,7 +66,17 @@ def render_chat_ui():
 
         # Send query to backend
         with st.spinner("Generating answer..."):
-            resp = post_json("/chat", {"query": user_query})
+            # Convert list of tuples [("user", "hi")] -> list of dicts [{"role": "user", "content": "hi"}]
+            history_payload = [
+                {"role": h_role, "content": h_msg} 
+                for h_role, h_msg in st.session_state.chat_history
+            ]
+            
+            # Send query AND history
+            resp = post_json("/chat", {
+                "query": user_query,
+                "history": history_payload
+            })
 
         if resp.ok:
             data = resp.json()
