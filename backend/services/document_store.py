@@ -22,8 +22,8 @@ class DocumentStore:
         chunk_size: int = 1500,
         chunk_overlap: int = 300,
         embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-        bm25_k: int = 4,
-        dense_k: int = 4,
+        bm25_k: int = 6,
+        dense_k: int = 6,
     ):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
