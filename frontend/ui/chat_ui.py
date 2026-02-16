@@ -29,6 +29,10 @@ def render_chat_ui():
         except Exception:
             # If backend is down, we just start with empty set (fail soft)
             pass
+    
+    # Uploader key to reset widget after successful upload
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
 
     # -----------------------------
     # Display chat history
@@ -47,26 +51,36 @@ def render_chat_ui():
         uploaded_files = st.file_uploader(
             "Upload local documents (PDF / TXT)",
             type=["pdf", "txt"],
-            accept_multiple_files=True
+            accept_multiple_files=True,
+            key=f"file_uploader_{st.session_state.uploader_key}"
         )
 
         # Logic: Filter files before sending
         upload_queue = []
+        duplicate_files = []
+        oversized_files = []
 
         if uploaded_files:
             for file in uploaded_files:
                 # Client Check 1: File Size
                 file_size_mb = file.size / (1024 * 1024)
                 if file_size_mb > MAX_FILE_SIZE_MB:
-                    st.error(f"❌ {file.name}: Exceeds {MAX_FILE_SIZE_MB}MB limit.")
+                    oversized_files.append((file.name, file_size_mb))
                     continue
                 
                 # Client Check 2: Name Duplication (Fast feedback)
                 if file.name in st.session_state.known_files:
-                    st.warning(f"⚠️ {file.name}: Already indexed.")
+                    duplicate_files.append(file.name)
                     continue
                 
                 upload_queue.append(file)
+
+        # Show warnings for any problematic files when user selects them
+        # (Uploader reset after upload means this won't trigger false warnings)
+        for name, size in oversized_files:
+            st.error(f"❌ {name}: Exceeds {MAX_FILE_SIZE_MB}MB limit.")
+        for name in duplicate_files:
+            st.warning(f"⚠️ {name}: Already indexed.")
 
         # Button to trigger upload for valid files
         if upload_queue:
@@ -98,6 +112,7 @@ def render_chat_ui():
                             else:
                                 # DUPLICATE CONTENT (Server-side hash check)
                                 st.warning(f"⚠️ {file.name}: Content already exists (Skipped).")
+                                st.session_state.known_files.add(file.name)
                         
                         elif resp.status_code == 400:
                             # Validation Error (e.g., .docx masquerading as .txt)
@@ -115,6 +130,8 @@ def render_chat_ui():
                     progress_bar.progress((i + 1) / len(upload_queue))
                 
                 status_text.text("Processing complete.")
+                # Reset file uploader by incrementing key
+                st.session_state.uploader_key += 1
                 # Rerun to update the sidebar list visually
                 st.rerun()
 
@@ -134,6 +151,7 @@ def render_chat_ui():
                 if resp.ok:
                     st.session_state.chat_history = []
                     st.session_state.known_files = set()
+                    st.session_state.uploader_key += 1  # Reset file uploader
                     st.success("System reset.")
                     st.rerun()
                 else:
