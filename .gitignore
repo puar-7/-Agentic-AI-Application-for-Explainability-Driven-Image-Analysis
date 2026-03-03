@@ -4,9 +4,13 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+*.pyc
 
-# Virtual environments
+# Virtual environments (Broadened)
 venv/
+*venv/
+black_box_venv/
+env/
 .env
 .env.*
 
@@ -19,13 +23,32 @@ Thumbs.db
 # Streamlit
 .streamlit/
 
-# Temporary files
+# Temporary & Uploaded files
 tmp/
 *.log
+uploads/
+backend/uploads/
 
-# Model / data artifacts (important for your workflow project)
+# Model / data artifacts 
 *.pkl
 *.joblib
 *.csv
 data/
 models/
+
+# --- Additions for Black Box Data & Models ---
+
+# Large Data & Datasets
+backend/storage/shared_workspace/data/
+
+# Model Weights & Embeddings
+embeddings/
+faiss_indexes/
+*.npz
+*.index
+*.pt
+*.pth
+
+# Outputs & Reports
+outputs/
+backend/black_box_core/outputs/
