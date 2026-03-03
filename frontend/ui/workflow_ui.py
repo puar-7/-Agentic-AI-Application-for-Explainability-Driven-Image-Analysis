@@ -78,7 +78,18 @@ def render_workflow_ui():
     # Black-box result
     if result.get("black_box_result"):
         with st.expander("📦 Black-box Analysis", expanded=True):
-            st.json(result["black_box_result"])
+            bb_data = result["black_box_result"].get("raw_output", {})
+            matches = bb_data.get("api_matches", [])
+            
+            if matches:
+                st.write("### Top Retrieval Matches")
+                cols = st.columns(len(matches))
+                for i, match in enumerate(matches):
+                    with cols[i]:
+                        # Assuming match["matched_path"] is accessible by the frontend
+                        st.image(match["matched_path"], caption=f"Score: {match['score']:.4f}")
+            else:
+                st.json(result["black_box_result"]) # Fallback
 
     # Report
     if result.get("report"):
