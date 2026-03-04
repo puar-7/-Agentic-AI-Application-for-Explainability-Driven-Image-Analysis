@@ -118,4 +118,4 @@ async def trigger_inference(req: InferRequest):
     }
 
 # To run this server independently:
-# uvicorn backend.black_box_service.server:app --port 8000 --reload
+# uvicorn backend.black_box_service.server:app --port 8001 --reload

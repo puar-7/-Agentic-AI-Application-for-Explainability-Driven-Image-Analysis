@@ -66,7 +66,7 @@ class BlackBoxNode:
                 method="black_box",
                 status="failure",
                 summary="Failed to connect to the Black-Box Microservice.",
-                raw_output={"error": "Is the FastAPI server running on port 8000?"}
+                raw_output={"error": "Is the FastAPI server running on port 8001?"}
             )
         except requests.exceptions.RequestException as e:
             # If the API crashed or returned a 500 error

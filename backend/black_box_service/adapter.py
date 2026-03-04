@@ -44,6 +44,7 @@ def safe_workspace(workspace_path):
 # ---------------------------------------------------------
 # 2. THE CLASS OVERRIDE (Fixing the C:\ Drive Hardcode)
 # ---------------------------------------------------------
+#inherit everything from her class 
 class SafeMetadataGenerator(MetadataGenerator):
     """
     Inherits from her exact class, but intercepts and safely rewrites
