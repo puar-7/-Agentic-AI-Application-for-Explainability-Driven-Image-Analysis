@@ -1,6 +1,6 @@
 import streamlit as st
-from ui.shared import post_json, post_files
-import requests
+from ui.shared import post_json, post_files #helper functions for API calls
+import requests #direct http calls
 from datetime import datetime
 
 
@@ -18,9 +18,9 @@ def render_chat_ui():
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    if "known_files" not in st.session_state:
+    if "known_files" not in st.session_state: #track which files we've already indexed to prevent duplicates and show in sidebar
         st.session_state.known_files = set()
-        try:
+        try: #fetch existing documents from backend on initial load to populate known_files (and show in sidebar) without needing user interaction
             from ui.shared import API_BASE
             response = requests.get(f"{API_BASE}/documents", timeout=5)
             if response.status_code == 200:
@@ -35,6 +35,7 @@ def render_chat_ui():
     if "pending_query" not in st.session_state:
         st.session_state.pending_query = None
 
+    greeting_placeholder = st.empty()
     # Handle pending query if any (from external triggers)
     if st.session_state.pending_query:
         user_query = st.session_state.pending_query
@@ -46,7 +47,7 @@ def render_chat_ui():
         _handle_query(user_query, greeting_placeholder)
 
     # Create a placeholder for the greeting (will be at the top)
-    greeting_placeholder = st.empty()
+    
 
     # Show greeting only if no chat history exists yet
     if not st.session_state.chat_history:

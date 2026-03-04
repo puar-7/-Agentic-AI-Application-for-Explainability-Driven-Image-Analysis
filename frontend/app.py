@@ -24,19 +24,18 @@ if "chat_history" not in st.session_state:
 # -----------------------------
 with st.sidebar:
     st.markdown("### Navigation")
-    mode = st.radio(
+    st.radio(
         "Select Mode",
         options=["chat", "workflow"],
-        index=0 if st.session_state.mode == "chat" else 1,
+        key="mode",                  # Streamlit owns the state — no index or manual assignment needed
         label_visibility="collapsed"
     )
 
-st.session_state.mode = mode
 
 # -----------------------------
 # Mode routing (no title/header)
 # -----------------------------
-if mode == "chat":
+if st.session_state.mode == "chat":
     render_chat_ui()
 else:
     render_workflow_ui()
