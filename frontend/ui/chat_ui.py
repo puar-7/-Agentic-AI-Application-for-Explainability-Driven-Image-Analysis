@@ -14,44 +14,6 @@ def get_greeting():
         return "Good evening, how can I help?"
 
 
-def _handle_query(user_query: str):
-    with st.spinner("Generating answer..."):
-        history_payload = [
-            {"role": h_role, "content": h_msg}
-            for h_role, h_msg in st.session_state.chat_history
-        ]
-        try:
-            resp = post_json("/chat", {
-                "query": user_query,
-                "history": history_payload
-            })
-
-            if resp.ok:
-                data = resp.json()
-                answer = data.get("answer", "")
-                sources = data.get("sources", [])
-
-                st.chat_message("assistant").write(answer)
-                st.session_state.chat_history.append(("assistant", answer))
-
-                if sources:
-                    with st.expander("Retrieved context"):
-                        for i, src in enumerate(sources, 1):
-                            st.markdown(f"**Chunk {i}:**")
-                            st.write(src.get("content", ""))
-                            st.divider()
-
-            elif resp.status_code == 404:
-                st.error("No documents found. Please upload documents first.")
-            elif resp.status_code == 500:
-                st.error("Server error while generating answer.")
-            else:
-                st.error("Something went wrong while processing your question.")
-
-        except Exception:
-            st.error("Cannot connect to backend. Is server running?")
-
-
 def render_chat_ui():
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
@@ -73,14 +35,54 @@ def render_chat_ui():
     if "pending_query" not in st.session_state:
         st.session_state.pending_query = None
 
+    # Handle pending query if any (from external triggers)
     if st.session_state.pending_query:
         user_query = st.session_state.pending_query
         st.session_state.pending_query = None
         st.chat_message("user").write(user_query)
         st.session_state.chat_history.append(("user", user_query))
-        _handle_query(user_query)
+        # We'll handle the query later in the input section
+        # but for simplicity, we'll just process it now
+        _handle_query(user_query, greeting_placeholder)
 
-    # --- SIDEBAR (restored from original) ---
+    # Create a placeholder for the greeting (will be at the top)
+    greeting_placeholder = st.empty()
+
+    # Show greeting only if no chat history exists yet
+    if not st.session_state.chat_history:
+        no_docs_hint = (
+            '<p style="font-size:0.88rem; color:#9AACBB; margin:0; text-align:center;">'
+            'Upload documents from the sidebar to get started.'
+            '</p>'
+            if not st.session_state.known_files else ""
+        )
+        greeting_html = f"""
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: calc(100vh - 220px);
+            gap: 10px;
+        ">
+            <p style="
+                font-size: 1.85rem;
+                font-weight: 600;
+                color: #1E2A38;
+                margin: 0;
+                letter-spacing: -0.4px;
+                text-align: center;
+            ">{get_greeting()}</p>
+            {no_docs_hint}
+        </div>
+        """
+        greeting_placeholder.markdown(greeting_html, unsafe_allow_html=True)
+
+    # Display existing chat messages (from history)
+    for role, message in st.session_state.chat_history:
+        st.chat_message(role).write(message)
+
+    # --- SIDEBAR (unchanged) ---
     with st.sidebar:
         st.markdown("#### Document Management")
 
@@ -180,48 +182,53 @@ def render_chat_ui():
                 st.error("Backend connection failed.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- MAIN AREA ---
-    if not st.session_state.chat_history:
-
-        no_docs_hint = (
-            '<p style="font-size:0.88rem; color:#9AACBB; margin:0; text-align:center;">'
-            'Upload documents from the sidebar to get started.'
-            '</p>'
-            if not st.session_state.known_files else ""
-        )
-
-        st.markdown(
-            f"""
-            <div style="
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                height: calc(100vh - 220px);
-                gap: 10px;
-            ">
-                <p style="
-                    font-size: 1.85rem;
-                    font-weight: 600;
-                    color: #1E2A38;
-                    margin: 0;
-                    letter-spacing: -0.4px;
-                    text-align: center;
-                ">{get_greeting()}</p>
-                {no_docs_hint}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    else:
-        for role, message in st.session_state.chat_history:
-            st.chat_message(role).write(message)
-
     # --- CHAT INPUT ---
     user_query = st.chat_input("Ask a question based on uploaded documents")
 
+    # Define query handler with access to the greeting placeholder
+    def _handle_query(query, placeholder):
+        with st.spinner("Generating answer..."):
+            history_payload = [
+                {"role": h_role, "content": h_msg}
+                for h_role, h_msg in st.session_state.chat_history
+            ]
+            try:
+                resp = post_json("/chat", {
+                    "query": query,
+                    "history": history_payload
+                })
+
+                if resp.ok:
+                    data = resp.json()
+                    answer = data.get("answer", "")
+                    sources = data.get("sources", [])
+
+                    st.chat_message("assistant").write(answer)
+                    st.session_state.chat_history.append(("assistant", answer))
+
+                    if sources:
+                        with st.expander("Retrieved context"):
+                            for i, src in enumerate(sources, 1):
+                                st.markdown(f"**Chunk {i}:**")
+                                st.write(src.get("content", ""))
+                                st.divider()
+
+                elif resp.status_code == 404:
+                    st.error("No documents found. Please upload documents first.")
+                elif resp.status_code == 500:
+                    st.error("Server error while generating answer.")
+                else:
+                    st.error("Something went wrong while processing your question.")
+
+            except Exception:
+                st.error("Cannot connect to backend. Is server running?")
+            finally:
+                # Clear the greeting placeholder after the assistant responds
+                placeholder.empty()
+
     if user_query:
+        # Display user message immediately
         st.chat_message("user").write(user_query)
         st.session_state.chat_history.append(("user", user_query))
-        _handle_query(user_query)
+        # Process the query and clear the greeting afterwards
+        _handle_query(user_query, greeting_placeholder)
