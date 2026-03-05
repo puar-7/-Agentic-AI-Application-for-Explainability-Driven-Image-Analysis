@@ -1,10 +1,12 @@
 from typing import Dict, Any
 
+
+
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from backend.graph.state import GraphState
 from backend.llm.hf_client import get_chat_llm
-
+import os 
 
 class ReportGenerationNode:
     """
@@ -20,7 +22,8 @@ class ReportGenerationNode:
     def _build_context(self, state: GraphState) -> str:
         workflow_input = state.workflow_input
 
-        return f"""
+        # Basic context (keep existing)
+        context = f"""
     WORKFLOW CONFIGURATION (RAW):
     {state.user_message}
 
@@ -38,7 +41,23 @@ class ReportGenerationNode:
 
     BLACK-BOX RESULT:
     {state.black_box_result if state.black_box_result else "Not executed"}
-    """.strip()
+        """.strip()
+
+        # Add detailed match information if available
+        if state.black_box_result and state.black_box_result.raw_output:
+            matches = state.black_box_result.raw_output.get("api_matches", [])
+            if matches:
+                lines = ["\nBLACK‑BOX MATCH DETAILS (top 5):"]
+                for m in matches:
+                    path = m.get("matched_path", "unknown")
+                    score = m.get("score", 0.0)
+                    label = m.get("label", "N/A")
+                    # Shorten path for readability (just filename)
+                    short_path = os.path.basename(path)
+                    lines.append(f"  - {short_path}  (score: {score:.4f}, label: {label})")
+                context += "\n" + "\n".join(lines)
+
+        return context
 
 
     def __call__(self, state: GraphState) -> Dict[str, Any]:
@@ -64,10 +83,13 @@ class ReportGenerationNode:
             "2. Workflow Configuration Summary\n"
             "3. Execution Path Taken\n"
             "4. Analysis Results\n"
+    "   - White-box: (summarize if executed)\n"
+    "   - Black-box: Based on the retrieved image matches provided below, "
+    "     analyze the results. Mention the number of matches, the range of similarity scores, "
+    "     any patterns in the filenames or labels (e.g., same identity, different poses), "
+    "     and whether the top match appears plausible.\n"
             "5. Limitations and Assumptions\n"
             "6. Conclusion\n\n"
-            "Then also produce a single, coherent human-readable report that combines "
-            "all sections into a continuous narrative.\n\n"
             f"Workflow Context:\n{context}"
         )
 
