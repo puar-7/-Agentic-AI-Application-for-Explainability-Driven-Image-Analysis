@@ -42,7 +42,7 @@ def startup_event():
     Loads the heavy model and FAISS index into memory exactly ONCE 
     when the FastAPI server starts.
     """
-    print("🚀 Starting Black-Box API: Loading heavy models into RAM...")
+    print(" Starting Black-Box API: Loading heavy models into RAM...")
     
     # We must run this inside the safe_workspace so her inference code 
     # can find the 'embeddings' and 'faiss_indexes' folders!
@@ -58,9 +58,9 @@ def startup_event():
             )
             state.inference_engine.load_system()
             state.is_loaded = True
-            print("✅ Models loaded successfully!")
+            print(" Models loaded successfully!")
         except Exception as e:
-            print(f"⚠️ Could not load models on startup. Did you run /build yet? Error: {e}")
+            print(f" Could not load models on startup. Did you run /build yet? Error: {e}")
 
 # ---------------------------------------------------------
 # ENDPOINT: BUILD (Asynchronous)

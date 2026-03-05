@@ -166,6 +166,8 @@ def save_results(
     total_samples,
     top_k=5
 ):
+    # ADD THIS LINE: Convert NumPy float32s to standard Python floats
+    results = {k: float(v) for k, v in results.items()}
     metric_dir = os.path.join("outputs", "reports", "metric_reports")
     os.makedirs(metric_dir, exist_ok=True)
 

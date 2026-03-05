@@ -61,7 +61,7 @@ class Inference:
     def load_system(self):
 
         # ---------- Load Model ----------
-        print("🔄 Loading model...")
+        print(" Loading model...")
         model_loader = ModelLoader(self.model_name)
         self.model = model_loader.get_model()
         self.model.eval()
@@ -70,7 +70,7 @@ class Inference:
         if not os.path.exists(self.embedding_file):
             raise FileNotFoundError("Embeddings file not found.")
 
-        print("📦 Loading embeddings metadata...")
+        print(" Loading embeddings metadata...")
         data = np.load(self.embedding_file, allow_pickle=True)
 
         self.embeddings = data["embeddings"].astype("float32")
@@ -83,7 +83,7 @@ class Inference:
         if not os.path.exists(self.index_file):
             raise FileNotFoundError("FAISS index file not found.")
 
-        print("🔄 Loading FAISS index...")
+        print(" Loading FAISS index...")
         self.faiss_index = FaissIndex(
             dim=embedding_dim,
             similarity=self.similarity,
@@ -91,7 +91,7 @@ class Inference:
         )
         self.faiss_index.load(self.index_file)
 
-        print("✅ System loaded successfully.\n")
+        print(" System loaded successfully.\n")
 
     # ----------------------------------------------------------
     # Preprocessing
