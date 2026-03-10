@@ -47,13 +47,20 @@ def render_workflow_ui():
     # Execute workflow via backend
     # -----------------------------
     with st.spinner("Running workflow..."):
-        resp = post_json(
-            "/workflow",
-            {"config_text": workflow_input_text}
-        )
+        try:
+            resp = post_json(
+                "/workflow",
+                {"config_text": workflow_input_text}
+            )
+        except Exception as e:
+            st.write("**Failed to reach backend entirely:**")
+            st.code(str(e))
+            return
 
     if not resp.ok:
-        st.error(resp.text)
+        st.write("**Status Code:**", resp.status_code)
+        st.write("**Content-Type:**", resp.headers.get("Content-Type", "unknown"))
+        st.code(resp.text[:2000], language="html")
         return
 
     result = resp.json()
