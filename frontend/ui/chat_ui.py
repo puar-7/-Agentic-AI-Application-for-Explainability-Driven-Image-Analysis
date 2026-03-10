@@ -140,10 +140,14 @@ def render_chat_ui():
                             err_msg = resp.json().get("detail", "Unsupported format")
                             st.error(f"{file.name}: {err_msg}")
                         else:
-                            st.error(f"{file.name}: Server error.")
+                            # Show exactly what came back — proxy HTML, 500 crash, anything
+                            st.write(f"**{file.name} — Status Code:**", resp.status_code)
+                            st.write("**Content-Type:**", resp.headers.get("Content-Type", "unknown"))
+                            st.code(resp.text[:2000], language="html")
 
                     except Exception as e:
-                        st.error(f"{file.name}: Connection failed.")
+                        st.error(f"{file.name}: Failed to reach backend.")
+                        st.code(str(e))
 
                     progress_bar.progress((i + 1) / len(upload_queue))
 
@@ -219,10 +223,12 @@ def render_chat_ui():
                 elif resp.status_code == 500:
                     st.error("Server error while generating answer.")
                 else:
-                    st.error("Something went wrong while processing your question.")
+                    st.write("**Status Code:**", resp.status_code)
+                    st.code(resp.text[:2000], language="html")
 
-            except Exception:
+            except Exception as e:
                 st.error("Cannot connect to backend. Is server running?")
+                st.code(str(e))
             finally:
                 # Clear the greeting placeholder after the assistant responds
                 placeholder.empty()
