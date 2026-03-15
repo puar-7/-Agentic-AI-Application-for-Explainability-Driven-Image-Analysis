@@ -8,14 +8,22 @@ def render_workflow_ui():
     st.markdown(
         """
         Enter the workflow configuration **in plain text**, following this format:
-
-        ```
-        dataset path - /data/example.csv
-        model path - /models/example.pkl
-        target variable - label
-        spurious attribute - gender
+```
+        dataset name - CELEBA
+        model name - RESNET
         execution mode - white | black | both
-        ```
+```
+
+        Optional fields (can be omitted):
+```
+        target variable - gender
+        spurious attribute - age
+        similarity - COSINE | EUCLIDEAN
+        explainer - LIME | SHAP | RISE
+```
+
+        Supported datasets: `CELEBA`, `VGGFACE2`, `DIGIFACE`  
+        Supported models: `RESNET`, `FACENET`
         """
     )
 
@@ -26,11 +34,9 @@ def render_workflow_ui():
         "Workflow Configuration",
         height=220,
         placeholder=(
-            "dataset path - /data/adult.csv\n"
-            "model path - /models/logreg.pkl\n"
-            "target variable - income\n"
-            "spurious attribute - gender\n"
-            "execution mode - both"
+            "dataset name - CELEBA\n"
+            "model name - RESNET\n"
+            "execution mode - black"
         )
     )
 

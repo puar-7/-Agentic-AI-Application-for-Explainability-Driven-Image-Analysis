@@ -1,41 +1,43 @@
-# No defaults → user must provide everything
-
-# Literal enforces strict routing
-
-# This schema becomes the contract between UI → router → nodes
-
-
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Literal, Optional
 
 
 class WorkflowInput(BaseModel):
     """
     Structured workflow configuration provided by the user in workflow mode.
-    This is assumed to be explicitly and correctly formatted (v1).
     """
 
-    dataset_path: str = Field(
+    dataset_name: Literal["CELEBA", "VGGFACE2", "DIGIFACE"] = Field(
         ...,
-        description="Path to the dataset used for analysis"
+        description="Supported datasets: CELEBA, VGGFACE2, DIGIFACE"
     )
 
-    model_path: str = Field(
+    model_name: Literal["RESNET", "FACENET"] = Field(
         ...,
-        description="Path to the trained model"
+        description="Supported models: RESNET, FACENET"
     )
 
-    target_variable: str = Field(
-        ...,
-        description="Target variable for prediction"
+    target_variable: Optional[str] = Field(
+        default=None,
+        description="Target variable for prediction (reserved for future use)"
     )
 
-    spurious_attribute: str = Field(
-        ...,
-        description="Spurious attribute to analyze bias or correlation"
+    spurious_attribute: Optional[str] = Field(
+        default=None,
+        description="Spurious attribute for bias analysis (reserved for future use)"
     )
 
     execution_mode: Literal["white", "black", "both"] = Field(
         ...,
         description="Execution mode for analysis"
+    )
+
+    similarity: Literal["COSINE", "EUCLIDEAN"] = Field(
+        default="COSINE",
+        description="Similarity measure for retrieval"
+    )
+
+    explainer: Literal["LIME", "SHAP", "RISE"] = Field(
+        default="LIME",
+        description="Explainability method"
     )

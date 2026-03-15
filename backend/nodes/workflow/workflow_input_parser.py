@@ -14,15 +14,24 @@ class WorkflowInputParserNode:
     using strict, rule-based extraction.
     """
 
-    FIELD_PATTERNS = {
-        "dataset_path": r"dataset path\s*-\s*(.+)",
-        "model_path": r"model path\s*-\s*(.+)",
-        "target_variable": r"target variable\s*-\s*(.+)",
+    REQUIRED_PATTERNS = {
+        "dataset_name":    r"dataset name\s*-\s*(.+)",
+        "model_name":      r"model name\s*-\s*(.+)",
+        "execution_mode":  r"execution mode\s*-\s*(.+)",
+    }
+
+    OPTIONAL_PATTERNS = {
+        "target_variable":   r"target variable\s*-\s*(.+)",
         "spurious_attribute": r"spurious attribute\s*-\s*(.+)",
-        "execution_mode": r"execution mode\s*-\s*(.+)",
+        "similarity":        r"similarity\s*-\s*(.+)",
+        "explainer":         r"explainer\s*-\s*(.+)",
     }
 
     ALLOWED_EXECUTION_MODES = {"white", "black", "both"}
+    ALLOWED_DATASETS = {"CELEBA", "VGGFACE2", "DIGIFACE"}
+    ALLOWED_MODELS = {"RESNET", "FACENET"}
+    ALLOWED_SIMILARITIES = {"COSINE", "EUCLIDEAN"}
+    ALLOWED_EXPLAINERS = {"LIME", "SHAP", "RISE"}
 
     def __call__(self, state: GraphState) -> Dict:
         if not state.user_message:
@@ -34,7 +43,8 @@ class WorkflowInputParserNode:
 
         extracted = {}
 
-        for field, pattern in self.FIELD_PATTERNS.items():
+        # Required fields 
+        for field, pattern in self.REQUIRED_PATTERNS.items():
             match = re.search(pattern, state.user_message, re.IGNORECASE)
             if not match:
                 msg = f"Missing or invalid field: {field.replace('_', ' ')}"
@@ -45,38 +55,71 @@ class WorkflowInputParserNode:
             extracted[field] = match.group(1).strip()
 
 
-        # Check if dataset file exists
-        if not os.path.exists(extracted["dataset_path"]):
-            msg = f"Dataset file not found at: {extracted['dataset_path']}"
+        # --- Optional fields ---
+        for field, pattern in self.OPTIONAL_PATTERNS.items():
+            match = re.search(pattern, state.user_message, re.IGNORECASE)
+            if match:
+                extracted[field] = match.group(1).strip()
+
+        # --- Validate dataset_name ---
+        dataset_name = extracted["dataset_name"].upper()
+        if dataset_name not in self.ALLOWED_DATASETS:
+            msg = (f"Invalid dataset name: '{dataset_name}'. "
+                   f"Allowed: {self.ALLOWED_DATASETS}")
             return {
                 "error": msg,
-                "chat_response": f"File Error: {msg}"
+                "chat_response": f"Workflow configuration error: {msg}"
             }
 
-        # Check if model file exists
-        if not os.path.exists(extracted["model_path"]):
-            msg = f"Model file not found at: {extracted['model_path']}"
+        # --- Validate model_name ---
+        model_name = extracted["model_name"].upper()
+        if model_name not in self.ALLOWED_MODELS:
+            msg = (f"Invalid model name: '{model_name}'. "
+                   f"Allowed: {self.ALLOWED_MODELS}")
             return {
                 "error": msg,
-                "chat_response": f"File Error: {msg}"
-            }    
+                "chat_response": f"Workflow configuration error: {msg}"
+            }
 
+        # --- Validate execution_mode ---
         execution_mode = extracted["execution_mode"].lower()
         if execution_mode not in self.ALLOWED_EXECUTION_MODES:
-            msg=(f"Invalid execution mode: {execution_mode}. "
-                  f"Allowed values: {self.ALLOWED_EXECUTION_MODES}")
+            msg = (f"Invalid execution mode: '{execution_mode}'. "
+                   f"Allowed: {self.ALLOWED_EXECUTION_MODES}")
+            return {
+                "error": msg,
+                "chat_response": f"Workflow configuration error: {msg}"
+            }
+
+        # --- Validate optional similarity ---
+        similarity = extracted.get("similarity", "COSINE").upper()
+        if similarity not in self.ALLOWED_SIMILARITIES:
+            msg = (f"Invalid similarity: '{similarity}'. "
+                   f"Allowed: {self.ALLOWED_SIMILARITIES}")
+            return {
+                "error": msg,
+                "chat_response": f"Workflow configuration error: {msg}"
+            }
+
+        # --- Validate optional explainer ---
+        explainer = extracted.get("explainer", "LIME").upper()
+        if explainer not in self.ALLOWED_EXPLAINERS:
+            msg = (f"Invalid explainer: '{explainer}'. "
+                   f"Allowed: {self.ALLOWED_EXPLAINERS}")
             return {
                 "error": msg,
                 "chat_response": f"Workflow configuration error: {msg}"
             }
 
         workflow_input = WorkflowInput(
-            dataset_path=extracted["dataset_path"],
-            model_path=extracted["model_path"],
-            target_variable=extracted["target_variable"],
-            spurious_attribute=extracted["spurious_attribute"],
-                execution_mode=execution_mode,
-            )
+            dataset_name=dataset_name,
+            model_name=model_name,
+            target_variable=extracted.get("target_variable"),
+            spurious_attribute=extracted.get("spurious_attribute"),
+            execution_mode=execution_mode,
+            similarity=similarity,
+            explainer=explainer,
+        )
 
         return {
             "workflow_input": workflow_input
