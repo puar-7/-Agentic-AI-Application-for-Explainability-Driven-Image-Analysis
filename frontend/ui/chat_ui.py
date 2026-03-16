@@ -2,7 +2,7 @@ import streamlit as st
 from ui.shared import post_json, post_files #helper functions for API calls
 import requests #direct http calls
 from datetime import datetime
-
+import os
 
 def get_greeting():
     hour = datetime.now().hour
@@ -12,6 +12,25 @@ def get_greeting():
         return "Good afternoon, how can I help?"
     else:
         return "Good evening, how can I help?"
+
+def _format_source_label(metadata: dict) -> str:
+    """
+    Builds a human-readable source label from chunk metadata.
+ 
+    PyPDFLoader  → provides 'source' (full path) + 'page' (0-indexed)
+    TextLoader   → provides 'source' (full path), no 'page'
+ 
+    Returns something like:
+        "deepsek mhc.pdf  •  Page 3"
+        "notes.txt"
+    """
+    source_path = metadata.get("source", "")
+    filename = os.path.basename(source_path) if source_path else "Unknown source"
+ 
+    page = metadata.get("page")  # None for .txt files
+    if page is not None:
+        return f"{filename}  •  Page {int(page) + 1}"  # convert 0-indexed → 1-indexed
+    return filename
 
 
 def render_chat_ui():
@@ -212,9 +231,17 @@ def render_chat_ui():
                     st.session_state.chat_history.append(("assistant", answer))
 
                     if sources:
-                        with st.expander("Retrieved context"):
+                        with st.expander(f"Retrieved context ({len(sources)} chunks)"):
                             for i, src in enumerate(sources, 1):
-                                st.markdown(f"**Chunk {i}:**")
+                                metadata = src.get("metadata", {})
+                                source_label = _format_source_label(metadata)
+ 
+                                # Header row: chunk number + source info
+                                st.markdown(
+                                    f"**Chunk {i}** &nbsp;·&nbsp; "
+                                    f"<span style='color:#6B8FA3; font-size:0.85rem;'>{source_label}</span>",
+                                    unsafe_allow_html=True
+                                )
                                 st.write(src.get("content", ""))
                                 st.divider()
 
