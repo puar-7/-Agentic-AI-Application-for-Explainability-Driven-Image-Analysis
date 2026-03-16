@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/")
-def chat(request: ChatRequest, http_request: Request): # Add http_request
+async def chat(request: ChatRequest, http_request: Request): # Add http_request
     # Use the global unified graph
     unified_graph = http_request.app.state.unified_graph
 
@@ -30,7 +30,7 @@ def chat(request: ChatRequest, http_request: Request): # Add http_request
         chat_history=request.history  # Pass chat history to the state
     )
 
-    final_state = unified_graph.run(state)
+    final_state = await unified_graph.run(state)
 
     return {
     "answer": final_state.chat_response,
