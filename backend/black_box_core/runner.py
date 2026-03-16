@@ -234,7 +234,7 @@ class Runner:
                 image_paths=paths,
                 embeddings=embeddings,
                 index=faiss_idx,
-                max_images=2, #200
+                max_images=10, #200
                 num_samples=50, #150
                 num_features=6
             )

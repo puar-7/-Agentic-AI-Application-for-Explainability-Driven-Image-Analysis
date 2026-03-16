@@ -1,0 +1,33 @@
+{
+  "job_id": "07d77d8c-d9e9-44e3-b5d7-cd7ff2e527e6",
+  "status": "completed",
+  "started_at": 1773650088.681016,
+  "dataset_name": "CELEBA",
+  "model_name": "RESNET",
+  "similarity": "COSINE",
+  "explainer": "LIME",
+  "metrics": {
+    "model": "RESNET",
+    "dataset": "CELEBA",
+    "similarity": "COSINE",
+    "top_k": 5,
+    "evaluated_queries": 10,
+    "metrics": {
+      "self_top1_accuracy": 0.0,
+      "avg_top2_score": 0.7345802187919617,
+      "avg_similarity_gap": 0.01570882275700569
+    }
+  },
+  "images": [
+    {
+      "image_id": "000018",
+      "overlay_url": "/outputs/heatmaps/overlays/000018_overlay.jpg",
+      "heatmap_url": "/outputs/heatmaps/heatmap_images/000018_heatmap.jpg"
+    },
+    {
+      "image_id": "000039",
+      "overlay_url": "/outputs/heatmaps/overlays/000039_overlay.jpg",
+      "heatmap_url": "/outputs/heatmaps/heatmap_images/000039_heatmap.jpg"
+    }
+  ]
+}

@@ -196,9 +196,9 @@ def _render_bb_success(bb_raw: dict) -> None:
         left, right = st.columns(2)
 
         with left:
-            st.image(overlay_url, caption="LIME Overlay", use_container_width=True)
+            st.image(overlay_url, caption="LIME Overlay", width=300)
         with right:
-            st.image(heatmap_url, caption="Importance Heatmap", use_container_width=True)
+            st.image(heatmap_url, caption="Importance Heatmap", width=300)
 
         st.divider()
 
