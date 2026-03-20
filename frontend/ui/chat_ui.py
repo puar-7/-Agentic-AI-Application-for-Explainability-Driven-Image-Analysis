@@ -13,24 +13,38 @@ def get_greeting():
     else:
         return "Good evening, how can I help?"
 
-def _format_source_label(metadata: dict) -> str:
+def _group_sources(sources: list) -> dict:
     """
-    Builds a human-readable source label from chunk metadata.
- 
-    PyPDFLoader  → provides 'source' (full path) + 'page' (0-indexed)
-    TextLoader   → provides 'source' (full path), no 'page'
- 
-    Returns something like:
-        "deepsek mhc.pdf  •  Page 3"
-        "notes.txt"
+    Groups retrieved chunks by filename and collects unique, sorted page numbers.
+
+    Input:  list of source dicts  [{content, metadata}, ...]
+    Output: dict  {filename: [page1, page2, ...] or None if no pages}
+
+    Example output:
+        {
+            "deepsek mhc.pdf": [3, 7, 9],
+            "notes.txt": None
+        }
     """
-    source_path = metadata.get("source", "")
-    filename = os.path.basename(source_path) if source_path else "Unknown source"
- 
-    page = metadata.get("page")  # None for .txt files
-    if page is not None:
-        return f"{filename}  •  Page {int(page) + 1}"  # convert 0-indexed → 1-indexed
-    return filename
+    grouped = {}  # filename → set of page numbers (or None for txt files)
+
+    for src in sources:
+        metadata = src.get("metadata", {})
+        source_path = metadata.get("source", "")
+        filename = os.path.basename(source_path) if source_path else "Unknown source"
+        page = metadata.get("page")  # None for .txt files
+
+        if filename not in grouped:
+            grouped[filename] = set() if page is not None else None
+
+        if page is not None and grouped[filename] is not None:
+            grouped[filename].add(int(page) + 1)  # convert 0-indexed → 1-indexed
+
+    # Convert sets to sorted lists for clean display
+    return {
+        filename: sorted(pages) if pages is not None else None
+        for filename, pages in grouped.items()
+    }
 
 
 def render_chat_ui():
@@ -231,19 +245,29 @@ def render_chat_ui():
                     st.session_state.chat_history.append(("assistant", answer))
 
                     if sources:
-                        with st.expander(f"Retrieved context ({len(sources)} chunks)"):
-                            for i, src in enumerate(sources, 1):
-                                metadata = src.get("metadata", {})
-                                source_label = _format_source_label(metadata)
- 
-                                # Header row: chunk number + source info
-                                st.markdown(
-                                    f"**Chunk {i}** &nbsp;·&nbsp; "
-                                    f"<span style='color:#6B8FA3; font-size:0.85rem;'>{source_label}</span>",
-                                    unsafe_allow_html=True
-                                )
-                                st.write(src.get("content", ""))
-                                st.divider()
+                        grouped = _group_sources(sources)
+                        source_lines = []
+
+                        for filename, pages in grouped.items():
+                            if pages is None:
+                                # .txt file — no page numbers
+                                source_lines.append(filename)
+                            elif len(pages) == 1:
+                                source_lines.append(f"{filename}  •  Page {pages[0]}")
+                            else:
+                                pages_str = ", ".join(str(p) for p in pages)
+                                source_lines.append(f"{filename}  •  Pages {pages_str}")
+
+                        sources_display = " &nbsp;|&nbsp; ".join(
+                            f"<span>{line}</span>" for line in source_lines
+                        )
+
+                        st.markdown(
+                            f"<p style='font-size:0.8rem; color:#6B8FA3; margin-top:4px;'>"
+                            f"📄 {sources_display}"
+                            f"</p>",
+                            unsafe_allow_html=True
+                        )
 
                 elif resp.status_code == 404:
                     st.error("No documents found. Please upload documents first.")
