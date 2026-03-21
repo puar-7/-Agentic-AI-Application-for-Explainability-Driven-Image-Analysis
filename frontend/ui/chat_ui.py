@@ -1,5 +1,6 @@
 import streamlit as st
 from ui.shared import post_json, post_files #helper functions for API calls
+from ui.theme import get_greeting_color
 import requests #direct http calls
 from datetime import datetime
 import os
@@ -90,6 +91,7 @@ def render_chat_ui():
             '</p>'
             if not st.session_state.known_files else ""
         )
+        greeting_color = get_greeting_color()
         greeting_html = f"""
         <div style="
             display: flex;
@@ -102,7 +104,7 @@ def render_chat_ui():
             <p style="
                 font-size: 1.85rem;
                 font-weight: 600;
-                color: #1E2A38;
+                color: {greeting_color};
                 margin: 0;
                 letter-spacing: -0.4px;
                 text-align: center;
