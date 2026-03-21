@@ -52,3 +52,6 @@ faiss_indexes/
 # Outputs & Reports
 outputs/
 backend/black_box_core/outputs/
+
+# Ignore generated job JSON files
+backend/storage/shared_workspace/storage/jobs/*.json
