@@ -43,6 +43,38 @@ class GraphState(BaseModel):
         description="LLM-generated chat response"
     )
 
+    # ------------------------------------------------------------------
+    # CRAG fields
+    # ------------------------------------------------------------------
+
+    retrieval_grade: Optional[Literal["correct", "incorrect", "ambiguous"]] = Field(
+        default=None,
+        description=(
+            "Relevance grade assigned by RetrievalGraderNode. "
+            "correct → use docs only. "
+            "incorrect → discard docs, use web only. "
+            "ambiguous → merge docs + web."
+        )
+    )
+
+    web_search_results: Optional[List[Any]] = Field(
+        default=None,
+        description=(
+            "Normalized web search results. Each item is a dict with "
+            "keys: content, metadata (source_type, title, url)."
+        )
+    )
+
+    context_source: Optional[Literal["documents", "web", "hybrid"]] = Field(
+        default=None,
+        description=(
+            "Tells ChatLLMNode where the context came from so it can "
+            "adjust the system prompt accordingly."
+        )
+    )
+
+    # ------------------------------------------------------------------
+
     # --- Workflow-related state ---
     workflow_input: Optional[WorkflowInput] = Field(
         default=None,
@@ -66,14 +98,14 @@ class GraphState(BaseModel):
 
     # --- Post-processing ---
     report: Optional[Dict[str, Any]] = Field(
-    default=None,
-    description="Structured workflow report"
-)
+        default=None,
+        description="Structured workflow report"
+    )
 
     evaluation: Optional[Dict[str, Any]] = Field(
-    default=None,
-    description="Structured evaluation summary"
-)
+        default=None,
+        description="Structured evaluation summary"
+    )
 
     # --- Error handling ---
     error: Optional[str] = Field(

@@ -24,3 +24,4 @@ python-multipart
 pymongo
 requests
 httpx
+tavily-python

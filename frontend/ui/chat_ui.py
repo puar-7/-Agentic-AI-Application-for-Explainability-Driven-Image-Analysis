@@ -16,35 +16,48 @@ def get_greeting():
 
 def _group_sources(sources: list) -> dict:
     """
-    Groups retrieved chunks by filename and collects unique, sorted page numbers.
+    Splits sources into two groups by source_type, then:
+      - Groups local docs  by filename with sorted unique page numbers
+      - Groups web results by URL (deduplicated), keeping title + url
 
-    Input:  list of source dicts  [{content, metadata}, ...]
-    Output: dict  {filename: [page1, page2, ...] or None if no pages}
-
-    Example output:
+    Returns:
         {
-            "deepsek mhc.pdf": [3, 7, 9],
-            "notes.txt": None
+            "documents": {filename: [page, ...] or None},
+            "web":       [{"title": ..., "url": ...}, ...]
         }
     """
-    grouped = {}  # filename → set of page numbers (or None for txt files)
+    doc_groups = {}   # filename → set of page numbers (or None for txt)
+    web_seen   = {}   # url → {title, url}  (dict preserves insertion order)
 
     for src in sources:
-        metadata = src.get("metadata", {})
-        source_path = metadata.get("source", "")
-        filename = os.path.basename(source_path) if source_path else "Unknown source"
-        page = metadata.get("page")  # None for .txt files
+        metadata    = src.get("metadata", {})
+        source_type = metadata.get("source_type", "document")
 
-        if filename not in grouped:
-            grouped[filename] = set() if page is not None else None
+        # ── Local document chunk ──────────────────────────────────────
+        if source_type == "document":
+            source_path = metadata.get("source", "")
+            filename    = os.path.basename(source_path) if source_path else "Unknown source"
+            page        = metadata.get("page")
 
-        if page is not None and grouped[filename] is not None:
-            grouped[filename].add(int(page) + 1)  # convert 0-indexed → 1-indexed
+            if filename not in doc_groups:
+                doc_groups[filename] = set() if page is not None else None
 
-    # Convert sets to sorted lists for clean display
+            if page is not None and doc_groups[filename] is not None:
+                doc_groups[filename].add(int(page) + 1)  # 0-indexed → 1-indexed
+
+        # ── Web result ───────────────────────────────────────────────
+        elif source_type == "web":
+            url   = metadata.get("url", "")
+            title = metadata.get("title", "Untitled")
+            if url and url not in web_seen:
+                web_seen[url] = {"title": title, "url": url}
+
     return {
-        filename: sorted(pages) if pages is not None else None
-        for filename, pages in grouped.items()
+        "documents": {
+            filename: sorted(pages) if pages is not None else None
+            for filename, pages in doc_groups.items()
+        },
+        "web": list(web_seen.values()),
     }
 
 
@@ -248,28 +261,42 @@ def render_chat_ui():
 
                     if sources:
                         grouped = _group_sources(sources)
+                        doc_groups = grouped["documents"]
+                        web_groups = grouped["web"]
+
                         source_lines = []
 
-                        for filename, pages in grouped.items():
+                        # ── Local documents ───────────────────────────
+                        for filename, pages in doc_groups.items():
                             if pages is None:
-                                # .txt file — no page numbers
-                                source_lines.append(filename)
+                                source_lines.append(f"📄 {filename}")
                             elif len(pages) == 1:
-                                source_lines.append(f"{filename}  •  Page {pages[0]}")
+                                source_lines.append(f"📄 {filename}  •  Page {pages[0]}")
                             else:
                                 pages_str = ", ".join(str(p) for p in pages)
-                                source_lines.append(f"{filename}  •  Pages {pages_str}")
+                                source_lines.append(f"📄 {filename}  •  Pages {pages_str}")
 
-                        sources_display = " &nbsp;|&nbsp; ".join(
-                            f"<span>{line}</span>" for line in source_lines
-                        )
+                        # ── Web results ───────────────────────────────
+                        for web in web_groups:
+                            title = web["title"]
+                            url   = web["url"]
+                            # Show domain only to keep it compact
+                            try:
+                                from urllib.parse import urlparse
+                                domain = urlparse(url).netloc
+                            except Exception:
+                                domain = url
+                            source_lines.append(
+                                f"🌐 [{title}]({url}) &nbsp;`{domain}`"
+                            )
 
-                        st.markdown(
-                            f"<p style='font-size:0.8rem; color:#6B8FA3; margin-top:4px;'>"
-                            f"📄 {sources_display}"
-                            f"</p>",
-                            unsafe_allow_html=True
-                        )
+                        if source_lines:
+                            sources_md = "  \n".join(source_lines)
+                            st.markdown(
+                                f"<div style='font-size:0.8rem; color:#6B8FA3; "
+                                f"margin-top:4px;'>{sources_md}</div>",
+                                unsafe_allow_html=True
+                            )
 
                 elif resp.status_code == 404:
                     st.error("No documents found. Please upload documents first.")
