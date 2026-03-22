@@ -1,9 +1,10 @@
 import streamlit as st
-from ui.shared import post_json, post_files #helper functions for API calls
+from ui.shared import post_json, post_files
 from ui.theme import get_greeting_color
-import requests #direct http calls
+import requests
 from datetime import datetime
 import os
+
 
 def get_greeting():
     hour = datetime.now().hour
@@ -13,6 +14,7 @@ def get_greeting():
         return "Good afternoon, how can I help?"
     else:
         return "Good evening, how can I help?"
+
 
 def _group_sources(sources: list) -> dict:
     """
@@ -27,7 +29,7 @@ def _group_sources(sources: list) -> dict:
         }
     """
     doc_groups = {}   # filename → set of page numbers (or None for txt)
-    web_seen   = {}   # url → {title, url}  (dict preserves insertion order)
+    web_seen   = {}   # url → {title, url}
 
     for src in sources:
         metadata    = src.get("metadata", {})
@@ -61,13 +63,69 @@ def _group_sources(sources: list) -> dict:
     }
 
 
+def _render_sources(sources: list) -> None:
+    """
+    Renders source attribution lines below a chat message.
+
+    This is a pure display helper called from TWO places:
+      1. Inside _handle_query — for immediate display during a live query.
+      2. Inside the display loop — to replay sources after a rerun
+         (e.g. theme toggle), since sources are now stored in chat_history.
+
+    Keeping it as a single function guarantees both call sites produce
+    identical output.
+    """
+    if not sources:
+        return
+
+    grouped    = _group_sources(sources)
+    doc_groups = grouped["documents"]
+    web_groups = grouped["web"]
+
+    source_lines = []
+
+    # ── Local documents ───────────────────────────────────────────────
+    for filename, pages in doc_groups.items():
+        if pages is None:
+            source_lines.append(f"📄 {filename}")
+        elif len(pages) == 1:
+            source_lines.append(f"📄 {filename}  •  Page {pages[0]}")
+        else:
+            pages_str = ", ".join(str(p) for p in pages)
+            source_lines.append(f"📄 {filename}  •  Pages {pages_str}")
+
+    # ── Web results ───────────────────────────────────────────────────
+    for web in web_groups:
+        title = web["title"]
+        url   = web["url"]
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc
+        except Exception:
+            domain = url
+        source_lines.append(
+            f"🌐 [{title}]({url}) &nbsp;`{domain}`"
+        )
+
+    if source_lines:
+        sources_md = "  \n".join(source_lines)
+        st.markdown(
+            f"<div style='font-size:0.8rem; color:#6B8FA3; "
+            f"margin-top:4px;'>{sources_md}</div>",
+            unsafe_allow_html=True
+        )
+
+
 def render_chat_ui():
+    # ------------------------------------------------------------------
+    # Session state initialisation
+    # ------------------------------------------------------------------
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    if "known_files" not in st.session_state: #track which files we've already indexed to prevent duplicates and show in sidebar
+    if "known_files" not in st.session_state:
         st.session_state.known_files = set()
-        try: #fetch existing documents from backend on initial load to populate known_files (and show in sidebar) without needing user interaction
+        try:
             from ui.shared import API_BASE
             response = requests.get(f"{API_BASE}/documents", timeout=5)
             if response.status_code == 200:
@@ -83,20 +141,86 @@ def render_chat_ui():
         st.session_state.pending_query = None
 
     greeting_placeholder = st.empty()
-    # Handle pending query if any (from external triggers)
+
+    # ------------------------------------------------------------------
+    # _handle_query — defined BEFORE the pending_query block so it can
+    # be called from there without a NameError (latent bug fix).
+    # ------------------------------------------------------------------
+    def _handle_query(query, placeholder):
+        with st.spinner("Generating answer..."):
+
+            # Build history payload for backend — role + content only.
+            # Sources are UI metadata and must never be sent to the backend.
+            # Migration guard: handles both old tuple format and new dict format
+            # so existing sessions don't crash after a server restart.
+            history_payload = []
+            for msg in st.session_state.chat_history:
+                if isinstance(msg, tuple):
+                    h_role, h_content = msg[0], msg[1]
+                else:
+                    h_role, h_content = msg["role"], msg["content"]
+                history_payload.append({"role": h_role, "content": h_content})
+
+            try:
+                resp = post_json("/chat", {
+                    "query": query,
+                    "history": history_payload
+                })
+
+                if resp.ok:
+                    data    = resp.json()
+                    answer  = data.get("answer", "")
+                    sources = data.get("sources", [])
+
+                    # Render assistant message inline (immediate feedback)
+                    st.chat_message("assistant").write(answer)
+
+                    # Store in session state WITH sources so they survive
+                    # any future rerun (theme toggle, file upload, etc.)
+                    st.session_state.chat_history.append({
+                        "role":    "assistant",
+                        "content": answer,
+                        "sources": sources,
+                    })
+
+                    # Render sources inline (immediate feedback on this run)
+                    _render_sources(sources)
+
+                elif resp.status_code == 404:
+                    st.error("No documents found. Please upload documents first.")
+                elif resp.status_code == 500:
+                    st.error("Server error while generating answer.")
+                else:
+                    st.write("**Status Code:**", resp.status_code)
+                    st.write("**Content-Type:**", resp.headers.get("Content-Type", "unknown"))
+                    st.code(resp.text[:2000], language="html")
+
+            except Exception as e:
+                st.error("Cannot connect to backend. Is server running?")
+                st.code(str(e))
+            finally:
+                # Always clear the greeting once an interaction has happened
+                placeholder.empty()
+
+    # ------------------------------------------------------------------
+    # Handle pending query if any (future feature hook — currently a
+    # safe no-op because pending_query is always initialised to None
+    # and never set elsewhere in the codebase).
+    # ------------------------------------------------------------------
     if st.session_state.pending_query:
         user_query = st.session_state.pending_query
         st.session_state.pending_query = None
         st.chat_message("user").write(user_query)
-        st.session_state.chat_history.append(("user", user_query))
-        # We'll handle the query later in the input section
-        # but for simplicity, we'll just process it now
+        st.session_state.chat_history.append({
+            "role":    "user",
+            "content": user_query,
+            "sources": None,
+        })
         _handle_query(user_query, greeting_placeholder)
 
-    # Create a placeholder for the greeting (will be at the top)
-    
-
-    # Show greeting only if no chat history exists yet
+    # ------------------------------------------------------------------
+    # Greeting — only shown when there is no chat history yet
+    # ------------------------------------------------------------------
     if not st.session_state.chat_history:
         no_docs_hint = (
             '<p style="font-size:0.88rem; color:#9AACBB; margin:0; text-align:center;">'
@@ -127,11 +251,33 @@ def render_chat_ui():
         """
         greeting_placeholder.markdown(greeting_html, unsafe_allow_html=True)
 
-    # Display existing chat messages (from history)
-    for role, message in st.session_state.chat_history:
-        st.chat_message(role).write(message)
+    # ------------------------------------------------------------------
+    # Replay chat history
+    #
+    # Each message is now a dict: {"role", "content", "sources"}.
+    # Migration guard: also handles old tuple format so existing sessions
+    # don't crash if the server is restarted mid-session.
+    # Sources (assistant only) are re-rendered here on every rerun,
+    # which is what makes them survive theme toggles.
+    # ------------------------------------------------------------------
+    for msg in st.session_state.chat_history:
+        if isinstance(msg, tuple):
+            # Old format — no sources stored
+            role, content, sources = msg[0], msg[1], None
+        else:
+            role    = msg["role"]
+            content = msg["content"]
+            sources = msg.get("sources")
 
-    # --- SIDEBAR (unchanged) ---
+        st.chat_message(role).write(content)
+
+        # Sources only exist on assistant messages
+        if sources:
+            _render_sources(sources)
+
+    # ------------------------------------------------------------------
+    # Sidebar — document management (unchanged)
+    # ------------------------------------------------------------------
     with st.sidebar:
         st.markdown("#### Document Management")
 
@@ -144,7 +290,7 @@ def render_chat_ui():
             key=f"file_uploader_{st.session_state.uploader_key}"
         )
 
-        upload_queue = []
+        upload_queue    = []
         duplicate_files = []
         oversized_files = []
 
@@ -167,7 +313,7 @@ def render_chat_ui():
         if upload_queue:
             if st.button(f"Upload {len(upload_queue)} New File(s)"):
                 progress_bar = st.progress(0)
-                status_text = st.empty()
+                status_text  = st.empty()
 
                 for i, file in enumerate(upload_queue):
                     status_text.text(f"Uploading {file.name}...")
@@ -188,7 +334,6 @@ def render_chat_ui():
                             err_msg = resp.json().get("detail", "Unsupported format")
                             st.error(f"{file.name}: {err_msg}")
                         else:
-                            # Show exactly what came back — proxy HTML, 500 crash, anything
                             st.write(f"**{file.name} — Status Code:**", resp.status_code)
                             st.write("**Content-Type:**", resp.headers.get("Content-Type", "unknown"))
                             st.code(resp.text[:2000], language="html")
@@ -224,8 +369,8 @@ def render_chat_ui():
             try:
                 resp = post_json("/clear", {})
                 if resp.ok:
-                    st.session_state.chat_history = []
-                    st.session_state.known_files = set()
+                    st.session_state.chat_history  = []
+                    st.session_state.known_files   = set()
                     st.session_state.uploader_key += 1
                     st.success("System reset.")
                     st.rerun()
@@ -235,87 +380,17 @@ def render_chat_ui():
                 st.error("Backend connection failed.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- CHAT INPUT ---
+    # ------------------------------------------------------------------
+    # Chat input
+    # ------------------------------------------------------------------
     user_query = st.chat_input("Ask a question based on uploaded documents")
 
-    # Define query handler with access to the greeting placeholder
-    def _handle_query(query, placeholder):
-        with st.spinner("Generating answer..."):
-            history_payload = [
-                {"role": h_role, "content": h_msg}
-                for h_role, h_msg in st.session_state.chat_history
-            ]
-            try:
-                resp = post_json("/chat", {
-                    "query": query,
-                    "history": history_payload
-                })
-
-                if resp.ok:
-                    data = resp.json()
-                    answer = data.get("answer", "")
-                    sources = data.get("sources", [])
-
-                    st.chat_message("assistant").write(answer)
-                    st.session_state.chat_history.append(("assistant", answer))
-
-                    if sources:
-                        grouped = _group_sources(sources)
-                        doc_groups = grouped["documents"]
-                        web_groups = grouped["web"]
-
-                        source_lines = []
-
-                        # ── Local documents ───────────────────────────
-                        for filename, pages in doc_groups.items():
-                            if pages is None:
-                                source_lines.append(f"📄 {filename}")
-                            elif len(pages) == 1:
-                                source_lines.append(f"📄 {filename}  •  Page {pages[0]}")
-                            else:
-                                pages_str = ", ".join(str(p) for p in pages)
-                                source_lines.append(f"📄 {filename}  •  Pages {pages_str}")
-
-                        # ── Web results ───────────────────────────────
-                        for web in web_groups:
-                            title = web["title"]
-                            url   = web["url"]
-                            # Show domain only to keep it compact
-                            try:
-                                from urllib.parse import urlparse
-                                domain = urlparse(url).netloc
-                            except Exception:
-                                domain = url
-                            source_lines.append(
-                                f"🌐 [{title}]({url}) &nbsp;`{domain}`"
-                            )
-
-                        if source_lines:
-                            sources_md = "  \n".join(source_lines)
-                            st.markdown(
-                                f"<div style='font-size:0.8rem; color:#6B8FA3; "
-                                f"margin-top:4px;'>{sources_md}</div>",
-                                unsafe_allow_html=True
-                            )
-
-                elif resp.status_code == 404:
-                    st.error("No documents found. Please upload documents first.")
-                elif resp.status_code == 500:
-                    st.error("Server error while generating answer.")
-                else:
-                    st.write("**Status Code:**", resp.status_code)
-                    st.code(resp.text[:2000], language="html")
-
-            except Exception as e:
-                st.error("Cannot connect to backend. Is server running?")
-                st.code(str(e))
-            finally:
-                # Clear the greeting placeholder after the assistant responds
-                placeholder.empty()
-
     if user_query:
-        # Display user message immediately
+        # Render user message immediately (before history replay on next run)
         st.chat_message("user").write(user_query)
-        st.session_state.chat_history.append(("user", user_query))
-        # Process the query and clear the greeting afterwards
+        st.session_state.chat_history.append({
+            "role":    "user",
+            "content": user_query,
+            "sources": None,
+        })
         _handle_query(user_query, greeting_placeholder)

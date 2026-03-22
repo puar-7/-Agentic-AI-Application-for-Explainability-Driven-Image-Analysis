@@ -9,6 +9,14 @@ def _abs_url(relative_url: str) -> str:
 
 
 def render_workflow_ui():
+    # ------------------------------------------------------------------
+    # Persist the last successful result in session state so it survives
+    # any rerun that isn't triggered by the Run button — most importantly,
+    # the theme toggle rerun.  Only a new successful run overwrites it.
+    # ------------------------------------------------------------------
+    if "last_workflow_result" not in st.session_state:
+        st.session_state.last_workflow_result = None
+
     st.subheader("⚙️ Workflow Mode")
 
     st.markdown(
@@ -38,9 +46,6 @@ def render_workflow_ui():
         """
     )
 
-    # ----------------------------------------------------------
-    # Input
-    # ----------------------------------------------------------
     workflow_input_text = st.text_area(
         "Workflow Configuration",
         height=200,
@@ -53,74 +58,87 @@ def render_workflow_ui():
 
     run_clicked = st.button("▶ Run Workflow")
 
-    if not run_clicked:
-        return
+    # ------------------------------------------------------------------
+    # Handle button click
+    #
+    # Errors (bad input, network failure, pipeline error) are shown
+    # transiently via st.error / st.warning and do NOT overwrite the
+    # stored result, so a previous successful result stays visible.
+    #
+    # Only a new successful response overwrites last_workflow_result.
+    # ------------------------------------------------------------------
+    if run_clicked:
+        if not workflow_input_text.strip():
+            st.warning("Please provide workflow configuration before running.")
+        else:
+            with st.spinner(
+                "Running workflow… Black-box build may take several minutes. "
+                "Please keep this tab open."
+            ):
+                try:
+                    resp = post_json("/workflow", {"config_text": workflow_input_text})
+                except Exception as e:
+                    st.error("Failed to reach backend.")
+                    st.code(str(e))
+                    resp = None
 
-    if not workflow_input_text.strip():
-        st.warning("Please provide workflow configuration before running.")
-        return
+            if resp is not None:
+                if not resp.ok:
+                    st.write("**Status Code:**", resp.status_code)
+                    st.write("**Content-Type:**", resp.headers.get("Content-Type", "unknown"))
+                    st.code(resp.text[:2000], language="html")
+                else:
+                    result = resp.json()
+                    if result.get("error"):
+                        st.error(result["error"])
+                    else:
+                        # Store on success — this is the only place we write
+                        st.session_state.last_workflow_result = result
 
-    # ----------------------------------------------------------
-    # Execute
-    # ----------------------------------------------------------
-    with st.spinner(
-        "Running workflow… Black-box build may take several minutes. "
-        "Please keep this tab open."
-    ):
-        try:
-            resp = post_json("/workflow", {"config_text": workflow_input_text})
-        except Exception as e:
-            st.error("Failed to reach backend.")
-            st.code(str(e))
-            return
+    # ------------------------------------------------------------------
+    # Render last successful result
+    #
+    # This block runs on EVERY script execution — including reruns from
+    # theme toggle — so results are always visible as long as session
+    # state holds them.
+    # ------------------------------------------------------------------
+    if st.session_state.last_workflow_result is not None:
+        _render_workflow_result(st.session_state.last_workflow_result)
 
-    if not resp.ok:
-        st.write("**Status Code:**", resp.status_code)
-        st.write("**Content-Type:**", resp.headers.get("Content-Type", "unknown"))
-        st.code(resp.text[:2000], language="html")
-        return
 
-    result = resp.json()
+# ------------------------------------------------------------------
+# Result renderer — separated so the render path is clearly distinct
+# from the fetch path above.
+# ------------------------------------------------------------------
 
-    # ----------------------------------------------------------
-    # Top-level error (parse failure, routing error, etc.)
-    # ----------------------------------------------------------
-    if result.get("error"):
-        st.error(result["error"])
-        return
-
+def _render_workflow_result(result: dict) -> None:
+    """
+    Pure display function.  Renders a completed workflow result dict.
+    Called from render_workflow_ui() reading session state, so it works
+    identically on a fresh run and on any subsequent rerun.
+    """
     st.success("Workflow completed successfully.")
 
-    # ----------------------------------------------------------
-    # White-box result
-    # ----------------------------------------------------------
+    # ── White-box result ──────────────────────────────────────────────
     if result.get("white_box_result"):
         with st.expander("🔍 White-box Analysis", expanded=True):
             st.json(result["white_box_result"])
 
-    # ----------------------------------------------------------
-    # Black-box result
-    # ----------------------------------------------------------
+    # ── Black-box result ──────────────────────────────────────────────
     if result.get("black_box_result"):
-        bb = result["black_box_result"]
-        bb_raw = bb.get("raw_output") or {}
+        bb        = result["black_box_result"]
+        bb_raw    = bb.get("raw_output") or {}
         bb_status = bb.get("status")
 
         with st.expander("📦 Black-box Analysis", expanded=True):
-
-            # ---- Failed build ----
             if bb_status == "failure":
                 st.error(f"Black-box pipeline failed: {bb.get('summary', '')}")
                 if bb_raw.get("error"):
                     st.code(bb_raw["error"])
-
-            # ---- Successful build ----
             else:
                 _render_bb_success(bb_raw)
 
-    # ----------------------------------------------------------
-    # LLM Report
-    # ----------------------------------------------------------
+    # ── LLM Report ───────────────────────────────────────────────────
     if result.get("report"):
         with st.expander("📝 Workflow Report", expanded=True):
             report_content = result["report"]
@@ -130,9 +148,10 @@ def render_workflow_ui():
                 st.json(report_content)
 
 
-# ----------------------------------------------------------
-# Black-box success renderer
-# ----------------------------------------------------------
+# ------------------------------------------------------------------
+# Black-box success renderer (unchanged from original)
+# ------------------------------------------------------------------
+
 def _render_bb_success(bb_raw: dict) -> None:
     """
     Renders:
@@ -143,10 +162,10 @@ def _render_bb_success(bb_raw: dict) -> None:
 
     # ---- Configuration summary ----
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Dataset",   bb_raw.get("dataset_name", "—"))
-    col2.metric("Model",     bb_raw.get("model_name",   "—"))
-    col3.metric("Similarity",bb_raw.get("similarity",   "—"))
-    col4.metric("Explainer", bb_raw.get("explainer",    "—"))
+    col1.metric("Dataset",    bb_raw.get("dataset_name", "—"))
+    col2.metric("Model",      bb_raw.get("model_name",   "—"))
+    col3.metric("Similarity", bb_raw.get("similarity",   "—"))
+    col4.metric("Explainer",  bb_raw.get("explainer",    "—"))
 
     st.divider()
 
@@ -188,7 +207,7 @@ def _render_bb_success(bb_raw: dict) -> None:
     )
 
     for img in images:
-        image_id   = img.get("image_id", "unknown")
+        image_id    = img.get("image_id", "unknown")
         overlay_url = _abs_url(img["overlay_url"])
         heatmap_url = _abs_url(img["heatmap_url"])
 
@@ -203,9 +222,10 @@ def _render_bb_success(bb_raw: dict) -> None:
         st.divider()
 
 
-# ----------------------------------------------------------
-# Metrics dashboard helper
-# ----------------------------------------------------------
+# ------------------------------------------------------------------
+# Metrics dashboard helper (unchanged from original)
+# ------------------------------------------------------------------
+
 def _render_metrics(metric_values: dict) -> None:
     """
     Renders retrieval metrics as st.metric tiles.
@@ -222,20 +242,18 @@ def _render_metrics(metric_values: dict) -> None:
     """
 
     DISPLAY_LABELS = {
-        "top1_accuracy":      ("Top-1 Accuracy",        True),
-        "top5_accuracy":      ("Top-5 Accuracy",        True),
-        "mrr":                ("Mean Reciprocal Rank",  True),
-        "self_top1_accuracy": ("Self Top-1 Accuracy",   True),
-        "avg_top2_score":     ("Avg Top-2 Score",       False),
-        "avg_similarity_gap": ("Avg Similarity Gap",    False),
+        "top1_accuracy":      ("Top-1 Accuracy",       True),
+        "top5_accuracy":      ("Top-5 Accuracy",       True),
+        "mrr":                ("Mean Reciprocal Rank", True),
+        "self_top1_accuracy": ("Self Top-1 Accuracy",  True),
+        "avg_top2_score":     ("Avg Top-2 Score",      False),
+        "avg_similarity_gap": ("Avg Similarity Gap",   False),
     }
 
-    # Separate known metrics (show as tiles) from unknown (show as table)
     known   = {k: v for k, v in metric_values.items() if k in DISPLAY_LABELS}
     unknown = {k: v for k, v in metric_values.items() if k not in DISPLAY_LABELS}
 
     if known:
-        # Lay out up to 3 metrics per row
         keys   = list(known.keys())
         chunks = [keys[i:i+3] for i in range(0, len(keys), 3)]
 
@@ -245,12 +263,7 @@ def _render_metrics(metric_values: dict) -> None:
                 label, is_accuracy = DISPLAY_LABELS[key]
                 value = known[key]
 
-                # Format as percentage for accuracy/MRR, plain float otherwise
-                if is_accuracy:
-                    display_val = f"{value * 100:.2f}%"
-                else:
-                    display_val = f"{value:.4f}"
-
+                display_val = f"{value * 100:.2f}%" if is_accuracy else f"{value:.4f}"
                 col.metric(label=label, value=display_val)
 
     if unknown:

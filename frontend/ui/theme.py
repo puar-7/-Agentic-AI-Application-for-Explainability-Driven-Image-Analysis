@@ -161,7 +161,7 @@ header[data-testid="stHeader"] * {
 /* ── Inner floating wrapper ── */
 .stChatFloatingInputContainer {
     background-color: #0F1923 !important;
-    border-top: none !important;    /* border is handled by stBottom */
+    border-top: none !important;
     padding: 8px !important;
 }
 .stChatFloatingInputContainer > div {
@@ -179,10 +179,11 @@ header[data-testid="stHeader"] * {
     border-radius: 8px !important;
 }
 
-/* ── Chat input textarea text ── */
+/* ── Chat input textarea text + cursor ── */
 [data-testid="stChatInput"] textarea {
     background-color: #1A2535 !important;
     color: #E2E8F0 !important;
+    caret-color: #E2E8F0 !important;   /* FIX: makes cursor visible in dark mode */
     border: none !important;
 }
 [data-testid="stChatInput"] textarea::placeholder {
@@ -238,6 +239,7 @@ header[data-testid="stHeader"] * {
 .stTextArea textarea, .stTextInput input {
     background-color: #1A2535 !important;
     color: #E2E8F0 !important;
+    caret-color: #E2E8F0 !important;   /* FIX: visible cursor in text areas too */
     border: 1px solid #2D3F55 !important;
 }
 .stTextArea textarea::placeholder, .stTextInput input::placeholder {
@@ -385,7 +387,6 @@ def inject_theme_css():
     Injects shared CSS (always) plus the correct theme CSS.
     Must be called on every rerender so styles are always applied.
     """
-    # SHARED first — hides deploy button in both themes
     st.markdown(SHARED_CSS, unsafe_allow_html=True)
 
     if st.session_state.get("dark_mode", False):
