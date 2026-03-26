@@ -28,14 +28,13 @@ def _group_sources(sources: list) -> dict:
             "web":       [{"title": ..., "url": ...}, ...]
         }
     """
-    doc_groups = {}   # filename → set of page numbers (or None for txt)
-    web_seen   = {}   # url → {title, url}
+    doc_groups = {}
+    web_seen   = {}
 
     for src in sources:
         metadata    = src.get("metadata", {})
         source_type = metadata.get("source_type", "document")
 
-        # ── Local document chunk ──────────────────────────────────────
         if source_type == "document":
             source_path = metadata.get("source", "")
             filename    = os.path.basename(source_path) if source_path else "Unknown source"
@@ -45,9 +44,8 @@ def _group_sources(sources: list) -> dict:
                 doc_groups[filename] = set() if page is not None else None
 
             if page is not None and doc_groups[filename] is not None:
-                doc_groups[filename].add(int(page) + 1)  # 0-indexed → 1-indexed
+                doc_groups[filename].add(int(page) + 1)
 
-        # ── Web result ───────────────────────────────────────────────
         elif source_type == "web":
             url   = metadata.get("url", "")
             title = metadata.get("title", "Untitled")
@@ -66,14 +64,7 @@ def _group_sources(sources: list) -> dict:
 def _render_sources(sources: list) -> None:
     """
     Renders source attribution lines below a chat message.
-
-    This is a pure display helper called from TWO places:
-      1. Inside _handle_query — for immediate display during a live query.
-      2. Inside the display loop — to replay sources after a rerun
-         (e.g. theme toggle), since sources are now stored in chat_history.
-
-    Keeping it as a single function guarantees both call sites produce
-    identical output.
+    Unchanged from original.
     """
     if not sources:
         return
@@ -84,7 +75,6 @@ def _render_sources(sources: list) -> None:
 
     source_lines = []
 
-    # ── Local documents ───────────────────────────────────────────────
     for filename, pages in doc_groups.items():
         if pages is None:
             source_lines.append(f"📄 {filename}")
@@ -94,7 +84,6 @@ def _render_sources(sources: list) -> None:
             pages_str = ", ".join(str(p) for p in pages)
             source_lines.append(f"📄 {filename}  •  Pages {pages_str}")
 
-    # ── Web results ───────────────────────────────────────────────────
     for web in web_groups:
         title = web["title"]
         url   = web["url"]
@@ -116,9 +105,65 @@ def _render_sources(sources: list) -> None:
         )
 
 
+# ------------------------------------------------------------------
+# CHANGE 1 — ZIP upload feedback renderer
+#
+# New helper that renders the four-category response from the backend
+# for ZIP uploads. Called from the upload button handler when the
+# backend returns the new response schema.
+#
+# For direct file uploads the existing per-file success/warning/error
+# messages are kept — they're simpler and sufficient for single files.
+# ------------------------------------------------------------------
+
+def _render_upload_result(result: dict) -> None:
+    """
+    Renders a structured upload result from the backend.
+    Used for both direct and ZIP uploads now that the backend
+    returns the four-category schema for both.
+
+    Shows:
+        - st.success summary line
+        - st.warning for duplicates and unsupported files (collapsible)
+        - st.error for failures (collapsible, with reasons)
+    """
+    indexed     = result.get("indexed", [])
+    duplicates  = result.get("skipped_duplicates", [])
+    unsupported = result.get("skipped_unsupported", [])
+    failed      = result.get("failed", [])
+    source      = result.get("source", "direct")
+
+    label = "ZIP" if source == "zip" else "upload"
+
+    if indexed:
+        st.success(f"✅ {len(indexed)} file(s) indexed from {label}.")
+
+    if not indexed and not duplicates and not unsupported and not failed:
+        st.info("No files were processed.")
+        return
+
+    if duplicates:
+        with st.expander(f"⏭️ {len(duplicates)} already indexed (skipped)"):
+            for name in duplicates:
+                st.caption(f"• {name}")
+
+    if unsupported:
+        with st.expander(f"⚠️ {len(unsupported)} unsupported file type(s) skipped"):
+            for name in unsupported:
+                st.caption(f"• {name}")
+
+    if failed:
+        with st.expander(f"❌ {len(failed)} file(s) failed to load"):
+            for item in failed:
+                if isinstance(item, dict):
+                    st.caption(f"• **{item.get('file', '?')}** — {item.get('reason', '')}")
+                else:
+                    st.caption(f"• {item}")
+
+
 def render_chat_ui():
     # ------------------------------------------------------------------
-    # Session state initialisation
+    # Session state initialisation — unchanged
     # ------------------------------------------------------------------
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
@@ -140,19 +185,17 @@ def render_chat_ui():
     if "pending_query" not in st.session_state:
         st.session_state.pending_query = None
 
+    # Stores upload results across the rerun boundary so they survive
+    # the st.rerun() call that resets the file uploader widget.
+    # Without this, _render_upload_result output is wiped before the
+    # user can read it.
+    if "last_upload_results" not in st.session_state:
+        st.session_state.last_upload_results = []
+
     greeting_placeholder = st.empty()
 
-    # ------------------------------------------------------------------
-    # _handle_query — defined BEFORE the pending_query block so it can
-    # be called from there without a NameError (latent bug fix).
-    # ------------------------------------------------------------------
     def _handle_query(query, placeholder):
         with st.spinner("Generating answer..."):
-
-            # Build history payload for backend — role + content only.
-            # Sources are UI metadata and must never be sent to the backend.
-            # Migration guard: handles both old tuple format and new dict format
-            # so existing sessions don't crash after a server restart.
             history_payload = []
             for msg in st.session_state.chat_history:
                 if isinstance(msg, tuple):
@@ -172,18 +215,14 @@ def render_chat_ui():
                     answer  = data.get("answer", "")
                     sources = data.get("sources", [])
 
-                    # Render assistant message inline (immediate feedback)
                     st.chat_message("assistant").write(answer)
 
-                    # Store in session state WITH sources so they survive
-                    # any future rerun (theme toggle, file upload, etc.)
                     st.session_state.chat_history.append({
                         "role":    "assistant",
                         "content": answer,
                         "sources": sources,
                     })
 
-                    # Render sources inline (immediate feedback on this run)
                     _render_sources(sources)
 
                 elif resp.status_code == 404:
@@ -199,14 +238,8 @@ def render_chat_ui():
                 st.error("Cannot connect to backend. Is server running?")
                 st.code(str(e))
             finally:
-                # Always clear the greeting once an interaction has happened
                 placeholder.empty()
 
-    # ------------------------------------------------------------------
-    # Handle pending query if any (future feature hook — currently a
-    # safe no-op because pending_query is always initialised to None
-    # and never set elsewhere in the codebase).
-    # ------------------------------------------------------------------
     if st.session_state.pending_query:
         user_query = st.session_state.pending_query
         st.session_state.pending_query = None
@@ -218,9 +251,6 @@ def render_chat_ui():
         })
         _handle_query(user_query, greeting_placeholder)
 
-    # ------------------------------------------------------------------
-    # Greeting — only shown when there is no chat history yet
-    # ------------------------------------------------------------------
     if not st.session_state.chat_history:
         no_docs_hint = (
             '<p style="font-size:0.88rem; color:#9AACBB; margin:0; text-align:center;">'
@@ -251,18 +281,8 @@ def render_chat_ui():
         """
         greeting_placeholder.markdown(greeting_html, unsafe_allow_html=True)
 
-    # ------------------------------------------------------------------
-    # Replay chat history
-    #
-    # Each message is now a dict: {"role", "content", "sources"}.
-    # Migration guard: also handles old tuple format so existing sessions
-    # don't crash if the server is restarted mid-session.
-    # Sources (assistant only) are re-rendered here on every rerun,
-    # which is what makes them survive theme toggles.
-    # ------------------------------------------------------------------
     for msg in st.session_state.chat_history:
         if isinstance(msg, tuple):
-            # Old format — no sources stored
             role, content, sources = msg[0], msg[1], None
         else:
             role    = msg["role"]
@@ -271,24 +291,40 @@ def render_chat_ui():
 
         st.chat_message(role).write(content)
 
-        # Sources only exist on assistant messages
         if sources:
             _render_sources(sources)
 
     # ------------------------------------------------------------------
-    # Sidebar — document management (unchanged)
+    # Sidebar — document management
     # ------------------------------------------------------------------
     with st.sidebar:
+        # ------------------------------------------------------------------
+        # Render upload results from the previous run.
+        # These were stored in session state before st.rerun() was called,
+        # so they survive the rerun and are visible to the user here.
+        # Cleared immediately after rendering so they don't persist forever.
+        # ------------------------------------------------------------------
+        if st.session_state.last_upload_results:
+            for _result in st.session_state.last_upload_results:
+                _render_upload_result(_result)
+            st.session_state.last_upload_results = []
+
         st.markdown("#### Document Management")
 
-        MAX_FILE_SIZE_MB = 200
-
+        # CHANGE 2 — Add "zip" to accepted types.
+        # Also expanded to include all newly supported direct-upload types.
+        # The size warning is removed for ZIPs specifically because a ZIP
+        # of 30 PDFs may legitimately exceed 200MB; size enforcement for
+        # ZIPs happens server-side via Streamlit's upload limit (configurable
+        # in .streamlit/config.toml).
         uploaded_files = st.file_uploader(
-            "Upload local documents (PDF / TXT)",
-            type=["pdf", "txt"],
+            "Upload documents or a folder ZIP  (PDF / TXT / DOCX / XLSX / PPTX / ZIP)",
+            type=["pdf", "txt", "docx", "xlsx", "pptx", "zip"],
             accept_multiple_files=True,
             key=f"file_uploader_{st.session_state.uploader_key}"
         )
+
+        MAX_FILE_SIZE_MB = 200
 
         upload_queue    = []
         duplicate_files = []
@@ -296,13 +332,21 @@ def render_chat_ui():
 
         if uploaded_files:
             for file in uploaded_files:
-                file_size_mb = file.size / (1024 * 1024)
-                if file_size_mb > MAX_FILE_SIZE_MB:
-                    oversized_files.append((file.name, file_size_mb))
-                    continue
-                if file.name in st.session_state.known_files:
+                is_zip = file.name.lower().endswith(".zip")
+
+                # Skip client-side size check for ZIPs — server handles it
+                if not is_zip:
+                    file_size_mb = file.size / (1024 * 1024)
+                    if file_size_mb > MAX_FILE_SIZE_MB:
+                        oversized_files.append((file.name, file_size_mb))
+                        continue
+
+                # ZIPs are never in known_files by their ZIP name —
+                # their contents are. So skip the duplicate check for ZIPs.
+                if not is_zip and file.name in st.session_state.known_files:
                     duplicate_files.append(file.name)
                     continue
+
                 upload_queue.append(file)
 
         for name, size in oversized_files:
@@ -311,7 +355,7 @@ def render_chat_ui():
             st.warning(f"{name}: Already indexed.")
 
         if upload_queue:
-            if st.button(f"Upload {len(upload_queue)} New File(s)"):
+            if st.button(f"Upload {len(upload_queue)} File(s)"):
                 progress_bar = st.progress(0)
                 status_text  = st.empty()
 
@@ -323,15 +367,22 @@ def render_chat_ui():
                         resp = post_files("/upload-docs", files_payload)
 
                         if resp.status_code == 200:
-                            data = resp.json()
-                            if "new_files" in data:
-                                st.success(f"{file.name}: Indexed.")
-                                st.session_state.known_files.add(file.name)
-                            else:
-                                st.warning(f"{file.name}: Content already exists (Skipped).")
-                                st.session_state.known_files.add(file.name)
+                            result = resp.json()
+
+                            # Store result in session state — NOT rendered here.
+                            # st.rerun() at the end of this block wipes anything
+                            # rendered inline. Storing here means the results
+                            # survive the rerun and are rendered at the top of
+                            # the sidebar on the next script execution.
+                            st.session_state.last_upload_results.append(result)
+
+                            # Update known_files immediately — this also survives
+                            # the rerun since it's in session state.
+                            for indexed_name in result.get("indexed", []):
+                                st.session_state.known_files.add(indexed_name)
+
                         elif resp.status_code == 400:
-                            err_msg = resp.json().get("detail", "Unsupported format")
+                            err_msg = resp.json().get("detail", "Bad request")
                             st.error(f"{file.name}: {err_msg}")
                         else:
                             st.write(f"**{file.name} — Status Code:**", resp.status_code)
@@ -381,12 +432,11 @@ def render_chat_ui():
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
-    # Chat input
+    # Chat input — unchanged
     # ------------------------------------------------------------------
     user_query = st.chat_input("Ask a question based on uploaded documents")
 
     if user_query:
-        # Render user message immediately (before history replay on next run)
         st.chat_message("user").write(user_query)
         st.session_state.chat_history.append({
             "role":    "user",

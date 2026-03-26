@@ -25,3 +25,7 @@ pymongo
 requests
 httpx
 tavily-python
+pypdf
+docx2txt
+python-pptx
+openpyxl

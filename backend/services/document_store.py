@@ -1,7 +1,6 @@
 from typing import List
 import os
 
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -9,12 +8,27 @@ from langchain_community.vectorstores import FAISS
 from rank_bm25 import BM25Okapi
 import pickle
 
+# Import the dispatcher — this replaces the inline loader logic
+# that previously lived inside load_documents()
+from backend.services.file_dispatcher import (
+    load_file,
+    UnsupportedFileTypeError,
+    FileLoadError,
+)
+
+
 class DocumentStore:
     """
     Handles document ingestion, chunking, embedding, and hybrid retrieval.
 
     Hybrid retrieval = Dense (FAISS) + Sparse (BM25)
     This implementation is intentionally explicit and deterministic.
+
+    Change from original:
+        load_documents() now delegates to file_dispatcher.load_file()
+        instead of doing its own inline loader dispatch. This means
+        DocumentStore is purely responsible for indexing — loading
+        is fully owned by the dispatcher. All other methods are unchanged.
     """
 
     def __init__(
@@ -42,38 +56,51 @@ class DocumentStore:
         self.bm25 = None
         self.bm25_documents = []
 
-
     def add_documents(self, new_documents):
         """
         Append new documents to existing FAISS + BM25 indexes.
+        Unchanged from original.
         """
         if self.vector_store is None or self.bm25 is None:
             raise RuntimeError("Indexes must be loaded before appending.")
 
-        # Chunk only NEW documents
         new_chunks = self.chunk_documents(new_documents)
 
         if not new_chunks:
             return
 
-        # ---- Dense: FAISS append ----
         self.vector_store.add_documents(new_chunks)
 
-        # ---- Sparse: extend corpus + rebuild BM25 ----
         self.bm25_documents.extend(new_chunks)
         tokenized_corpus = [
             doc.page_content.lower().split()
             for doc in self.bm25_documents
         ]
         self.bm25 = BM25Okapi(tokenized_corpus)
+
     # ------------------------------------------------------------------
-    # Document Loading
+    # Document Loading — CHANGED
     # ------------------------------------------------------------------
 
     def load_documents(self, file_paths: List[str]):
         """
-        Load documents from disk.
-        Supports .txt and .pdf files.
+        Load documents from disk using the file dispatcher.
+
+        Previously contained an inline if/elif for .pdf and .txt only.
+        Now delegates to file_dispatcher.load_file() which handles
+        .pdf, .txt, .docx, .xlsx, .pptx via a clean registry.
+
+        Raises:
+            UnsupportedFileTypeError — if any path has an unsupported extension.
+                Re-raised directly so upload_routes can add it to skipped_unsupported.
+            FileLoadError — if any supported file fails to load.
+                Re-raised directly so upload_routes can add it to failed.
+            FileNotFoundError — if the path does not exist on disk.
+
+        Note: The caller (upload_routes) is expected to call load_file()
+        per-file and handle exceptions individually for ZIP batch uploads.
+        This method is used for direct (non-ZIP) uploads where a single
+        failure should abort the whole request, consistent with original behaviour.
         """
         documents = []
 
@@ -81,24 +108,21 @@ class DocumentStore:
             if not os.path.exists(path):
                 raise FileNotFoundError(f"File not found: {path}")
 
-            if path.endswith(".pdf"):
-                loader = PyPDFLoader(path)
-            elif path.endswith(".txt"):
-                loader = TextLoader(path, encoding="utf-8")
-            else:
-                raise ValueError(f"Unsupported file type: {path}")
-
-            documents.extend(loader.load())
+            # Delegates fully — UnsupportedFileTypeError and FileLoadError
+            # propagate up to the caller unchanged
+            docs = load_file(path)
+            documents.extend(docs)
 
         return documents
 
     # ------------------------------------------------------------------
-    # Chunking
+    # Chunking — Unchanged
     # ------------------------------------------------------------------
 
     def chunk_documents(self, documents):
         """
         Split documents into large, overlapping chunks.
+        Unchanged from original.
         """
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
@@ -107,27 +131,26 @@ class DocumentStore:
         return splitter.split_documents(documents)
 
     # ------------------------------------------------------------------
-    # Index Construction
+    # Index Construction — Unchanged
     # ------------------------------------------------------------------
 
     def build_indexes(self, documents):
         """
-        Build:
-        1. FAISS vector index for dense retrieval
-        2. BM25 index for keyword retrieval
+        Build FAISS and BM25 indexes from scratch.
+        Unchanged from original.
         """
         chunks = self.chunk_documents(documents)
 
         if not chunks:
             raise ValueError("No document chunks created.")
 
-        # ---------- Dense (FAISS) ----------
+        # Dense (FAISS)
         self.vector_store = FAISS.from_documents(
             chunks,
             embedding=self.embeddings
         )
 
-        # ---------- Sparse (BM25) ----------
+        # Sparse (BM25)
         self.bm25_documents = chunks
         tokenized_corpus = [
             doc.page_content.lower().split()
@@ -135,16 +158,18 @@ class DocumentStore:
         ]
         self.bm25 = BM25Okapi(tokenized_corpus)
 
-
     def save(self, path: str):
+        """Unchanged from original."""
         with open(path, "wb") as f:
             pickle.dump({
                 "vector_store": self.vector_store,
                 "bm25": self.bm25,
                 "bm25_documents": self.bm25_documents
             }, f)
+
     @classmethod
     def load(cls, path: str):
+        """Unchanged from original."""
         with open(path, "rb") as f:
             data = pickle.load(f)
 
@@ -152,28 +177,27 @@ class DocumentStore:
         store.vector_store = data["vector_store"]
         store.bm25 = data["bm25"]
         store.bm25_documents = data["bm25_documents"]
-        return store        
+        return store
+
     # ------------------------------------------------------------------
-    # Hybrid Retrieval
+    # Hybrid Retrieval — Unchanged
     # ------------------------------------------------------------------
 
     def hybrid_retrieve(self, query: str):
         """
-        Perform hybrid retrieval:
-        - Dense similarity search (FAISS)
-        - Sparse keyword search (BM25)
-        - Merge results deterministically
+        Perform hybrid retrieval: Dense (FAISS) + Sparse (BM25).
+        Unchanged from original.
         """
         if self.vector_store is None or self.bm25 is None:
             raise RuntimeError("Indexes not built. Call build_indexes() first.")
 
-        # ---------- Dense Retrieval ----------
+        # Dense
         dense_docs = self.vector_store.similarity_search(
             query,
             k=self.dense_k
         )
 
-        # ---------- Sparse Retrieval ----------
+        # Sparse
         tokenized_query = query.lower().split()
         scores = self.bm25.get_scores(tokenized_query)
 
@@ -185,16 +209,18 @@ class DocumentStore:
 
         sparse_docs = [self.bm25_documents[i] for i in top_bm25_indices]
 
-        # ---------- Merge (deduplicate by content) ----------
+        # Merge (deduplicate by content)
         combined = {
             doc.page_content: doc
             for doc in dense_docs + sparse_docs
         }
 
         return list(combined.values())
+
     def reset(self):
         """
         Clears the in-memory state of the store.
+        Unchanged from original.
         """
         self.vector_store = None
         self.bm25 = None
