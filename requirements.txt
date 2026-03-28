@@ -29,3 +29,7 @@ pypdf
 docx2txt
 python-pptx
 openpyxl
+
+# MCP — black-box microservice as MCP server, BlackBoxNode as MCP client
+fastmcp>=0.4.0
+mcp>=1.0.0

@@ -1,31 +1,54 @@
+# backend/nodes/workflow/black_box_node.py
+#
+# Drives the black-box build pipeline via MCP.
+#
+# Change from original:
+#   - httpx removed entirely
+#   - mcp.client.sse + ClientSession replace raw HTTP calls
+#   - BLACK_BOX_API_URL replaced with BLACK_BOX_MCP_URL (env-var driven)
+#   - Polling loop structure, timeout logic, ExecutionResult packaging
+#     are all identical to the original
+
 import asyncio
+import json
+import os
 from typing import Dict
 
-import httpx
+from mcp.client.sse import sse_client
+from mcp import ClientSession
 
 from backend.graph.state import GraphState
 from backend.schemas.execution_result import ExecutionResult
 
-# Port 8001 microservice
-BLACK_BOX_API_URL = "http://localhost:8001"
+# ----------------------------------------------------------
+# MCP server URL
+# Override via environment variable for Docker / remote deployment.
+# Port 8001 mounts the MCP server at /mcp  →  SSE at /mcp/sse
+# ----------------------------------------------------------
+BLACK_BOX_MCP_URL = os.getenv(
+    "BLACK_BOX_MCP_URL",
+    "http://localhost:8001/mcp/sse"
+)
 
-# Polling configuration
+# Polling configuration — unchanged from original
 POLL_INTERVAL_SECONDS = 5
-POLL_TIMEOUT_SECONDS  = 1800   # 30 minutes — covers large datasets( change as required)
+POLL_TIMEOUT_SECONDS  = 1800   # 30 minutes
 
 
 class BlackBoxNode:
     """
-    Async LangGraph node that drives the black-box build pipeline.
+    Async LangGraph node that drives the black-box build pipeline via MCP.
 
     Flow:
-        1. Extract dataset_name, model_name, similarity, explainer
-           from state.workflow_input  (no more hardcoded paths or hacks)
-        2. POST /build  → receives job_id immediately
-        3. Poll GET /status/{job_id} every POLL_INTERVAL_SECONDS
-        4. On "completed" → package metrics + image URLs into ExecutionResult
-        5. On "failed"    → package error into ExecutionResult (no exception raise,
-                            so ReportGenerationNode still runs and MongoDB still saves)
+        1. Call run_build MCP tool  → receives job_id immediately
+        2. Poll get_job_status MCP tool every POLL_INTERVAL_SECONDS
+        3. On "completed" → package metrics + image URLs into ExecutionResult
+        4. On "failed"    → package error into ExecutionResult (no exception
+                            raise, so ReportGenerationNode still runs)
+
+    Each MCP call opens its own SSE session. This is intentional — it avoids
+    SSE connection timeouts during long builds (which can take 30+ minutes)
+    without requiring any keepalive logic.
     """
 
     async def __call__(self, state: GraphState) -> Dict:
@@ -45,12 +68,6 @@ class BlackBoxNode:
 
         wi = state.workflow_input
 
-        # ----------------------------------------------------------
-        # Step 1 — Build the request payload from workflow_input.
-        # dataset_name, model_name, similarity, explainer are all
-        # validated upstream by WorkflowInputParserNode, so no
-        # extra validation needed here.
-        # ----------------------------------------------------------
         build_payload = {
             "dataset_name": wi.dataset_name,
             "model_name":   wi.model_name,
@@ -59,53 +76,62 @@ class BlackBoxNode:
         }
 
         print(
-            f"[BlackBoxNode] Firing build — "
+            f"[BlackBoxNode] Firing build via MCP — "
             f"dataset={wi.dataset_name} model={wi.model_name} "
             f"similarity={wi.similarity} explainer={wi.explainer}"
         )
 
         # ----------------------------------------------------------
-        # Step 2 — POST /build, get job_id back immediately
+        # Step 1 — Call run_build tool, get job_id back immediately
         # ----------------------------------------------------------
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                resp = await client.post(
-                    f"{BLACK_BOX_API_URL}/build",
-                    json=build_payload,
+        try:
+            async with sse_client(BLACK_BOX_MCP_URL) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    build_result = await session.call_tool(
+                        "run_build",
+                        arguments=build_payload,
+                    )
+
+        except Exception as e:
+            return {
+                "black_box_result": ExecutionResult(
+                    method="black_box",
+                    status="failure",
+                    summary=(
+                        f"Could not connect to the Black-Box MCP server at "
+                        f"{BLACK_BOX_MCP_URL}. Is port 8001 running? "
+                        f"Error: {e}"
+                    ),
+                    raw_output={"error": str(e)},
                 )
-                resp.raise_for_status()
-                build_data = resp.json()
+            }
 
-            except httpx.ConnectError:
-                return {
-                    "black_box_result": ExecutionResult(
-                        method="black_box",
-                        status="failure",
-                        summary=(
-                            "Could not connect to the Black-Box microservice. "
-                            "Is port 8001 running?"
-                        ),
-                        raw_output={"error": "ConnectionError on POST /build"},
-                    )
-                }
+        # MCP tool itself returned an error
+        if build_result.isError:
+            error_text = (
+                build_result.content[0].text
+                if build_result.content
+                else "Unknown MCP tool error"
+            )
+            return {
+                "black_box_result": ExecutionResult(
+                    method="black_box",
+                    status="failure",
+                    summary=f"run_build MCP tool returned an error: {error_text}",
+                    raw_output={"error": error_text},
+                )
+            }
 
-            except httpx.HTTPStatusError as e:
-                return {
-                    "black_box_result": ExecutionResult(
-                        method="black_box",
-                        status="failure",
-                        summary=f"Black-Box microservice returned an error on /build: {e}",
-                        raw_output={"error": str(e)},
-                    )
-                }
-
+        build_data = json.loads(build_result.content[0].text)
         job_id = build_data.get("job_id")
+
         if not job_id:
             return {
                 "black_box_result": ExecutionResult(
                     method="black_box",
                     status="failure",
-                    summary="Black-Box microservice did not return a job_id.",
+                    summary="run_build tool did not return a job_id.",
                     raw_output={"response": build_data},
                 )
             }
@@ -113,7 +139,10 @@ class BlackBoxNode:
         print(f"[BlackBoxNode] Build accepted — job_id={job_id}")
 
         # ----------------------------------------------------------
-        # Step 3 — Poll GET /status/{job_id} until done or timeout
+        # Step 2 — Poll get_job_status tool until done or timeout
+        #
+        # Each poll opens a fresh MCP session. This avoids SSE timeout
+        # issues during long builds without any keepalive complexity.
         # ----------------------------------------------------------
         elapsed = 0
 
@@ -122,56 +151,57 @@ class BlackBoxNode:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             elapsed += POLL_INTERVAL_SECONDS
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                try:
-                    status_resp = await client.get(
-                        f"{BLACK_BOX_API_URL}/status/{job_id}"
-                    )
-                    status_resp.raise_for_status()
-                    job_data = status_resp.json()
-
-                except httpx.ConnectError:
-                    # Transient network hiccup — keep polling
-                    print(
-                        f"[BlackBoxNode] Poll failed (ConnectError) — "
-                        f"job_id={job_id} elapsed={elapsed}s. Retrying..."
-                    )
-                    continue
-
-                except httpx.HTTPStatusError as e:
-                    # 404 right after firing can be a transient race —
-                    # the background task may not have written the job file yet
-                    if e.response.status_code == 404 and elapsed <= POLL_INTERVAL_SECONDS * 2:
-                        print(
-                            f"[BlackBoxNode] Job file not yet written (404) — "
-                            f"job_id={job_id}. Retrying..."
+            # ---- Poll ----
+            try:
+                async with sse_client(BLACK_BOX_MCP_URL) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        status_result = await session.call_tool(
+                            "get_job_status",
+                            arguments={"job_id": job_id},
                         )
-                        continue
 
-                    return {
-                        "black_box_result": ExecutionResult(
-                            method="black_box",
-                            status="failure",
-                            summary=f"Unexpected error while polling status: {e}",
-                            raw_output={"error": str(e), "job_id": job_id},
-                        )
-                    }
+            except Exception as e:
+                # Transient connection failure — keep polling, same as
+                # original ConnectError handling on httpx
+                print(
+                    f"[BlackBoxNode] Poll connection failed — "
+                    f"job_id={job_id} elapsed={elapsed}s: {e}. Retrying..."
+                )
+                continue
 
+            # MCP tool error on status check — transient, keep polling
+            if status_result.isError:
+                print(
+                    f"[BlackBoxNode] get_job_status tool error — "
+                    f"job_id={job_id} elapsed={elapsed}s. Retrying..."
+                )
+                continue
+
+            job_data   = json.loads(status_result.content[0].text)
             job_status = job_data.get("status")
+
             print(
                 f"[BlackBoxNode] Poll — job_id={job_id} "
                 f"status={job_status} elapsed={elapsed}s"
             )
 
+            # Job file not yet written — background thread hasn't started
+            # writing yet. Same race as original 404 handling on httpx.
+            if job_status == "not_found" and elapsed <= POLL_INTERVAL_SECONDS * 2:
+                print(
+                    f"[BlackBoxNode] Job file not yet written — "
+                    f"job_id={job_id}. Retrying..."
+                )
+                continue
+
             # --------------------------------------------------
-            # Step 4a — Build completed successfully
+            # Build completed successfully
             # --------------------------------------------------
             if job_status == "completed":
                 metrics = job_data.get("metrics", {})
                 images  = job_data.get("images",  [])
 
-                # Build a human-readable summary from real metrics
-                # so ReportGenerationNode has structured data to work with
                 summary = _build_summary(
                     wi.dataset_name, wi.model_name,
                     wi.similarity, metrics, images,
@@ -183,19 +213,19 @@ class BlackBoxNode:
                         status="success",
                         summary=summary,
                         raw_output={
-                            "job_id":      job_id,
+                            "job_id":       job_id,
                             "dataset_name": wi.dataset_name,
                             "model_name":   wi.model_name,
                             "similarity":   wi.similarity,
                             "explainer":    wi.explainer,
                             "metrics":      metrics,
-                            "images":       images,        # list of {image_id, overlay_url, heatmap_url}
+                            "images":       images,
                         },
                     )
                 }
 
             # --------------------------------------------------
-            # Step 4b — Build failed inside the pipeline
+            # Build failed inside the pipeline
             # --------------------------------------------------
             if job_status == "failed":
                 error_msg = job_data.get("error", "Unknown pipeline error.")
@@ -211,12 +241,10 @@ class BlackBoxNode:
                     )
                 }
 
-            # --------------------------------------------------
             # Still processing — loop continues
-            # --------------------------------------------------
 
         # ----------------------------------------------------------
-        # Step 5 — Timeout exceeded
+        # Timeout exceeded
         # ----------------------------------------------------------
         return {
             "black_box_result": ExecutionResult(
@@ -236,7 +264,7 @@ class BlackBoxNode:
 
 
 # ----------------------------------------------------------
-# Helper — build a structured summary string from real metrics
+# Helper — unchanged from original
 # ----------------------------------------------------------
 def _build_summary(
     dataset_name: str,
@@ -245,12 +273,8 @@ def _build_summary(
     metrics: dict,
     images: list,
 ) -> str:
-    """
-    Produces a structured plain-text summary from the real pipeline outputs.
-    This is what ReportGenerationNode receives as context — no LLM invention.
-    """
     lines = [
-        f"Black-box build completed successfully.",
+        "Black-box build completed successfully.",
         f"  Dataset   : {dataset_name}",
         f"  Model     : {model_name}",
         f"  Similarity: {similarity}",
@@ -259,9 +283,8 @@ def _build_summary(
     ]
 
     if metrics:
-        metric_data = metrics.get("metrics", metrics)   # handle nested or flat
+        metric_data = metrics.get("metrics", metrics)
         for key, value in metric_data.items():
-            # Format floats to 4 decimal places, pass others through
             if isinstance(value, float):
                 lines.append(f"  {key}: {value:.4f}")
             else:
