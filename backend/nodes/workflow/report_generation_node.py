@@ -3,7 +3,7 @@ from typing import Dict, Any
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from backend.graph.state import GraphState
-from backend.llm.hf_client import get_chat_llm
+from backend.llm.hf_client import get_llm
 
 
 class ReportGenerationNode:
@@ -18,7 +18,7 @@ class ReportGenerationNode:
     """
 
     def __init__(self):
-        self.llm = get_chat_llm()
+        self.llm = get_llm()
 
     # ----------------------------------------------------------
     # Context builder

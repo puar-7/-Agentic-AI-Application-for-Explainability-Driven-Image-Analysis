@@ -15,7 +15,7 @@ class ChatLLMNode:
         "hybrid"    — answer from both docs and web results merged
     """
 
-    def __init__(self, llm: ChatHuggingFace):
+    def __init__(self, llm):
         self.llm = llm
         self.MAX_INPUT_CHARS = 24000
 
@@ -29,10 +29,6 @@ class ChatLLMNode:
         )
 
     def _build_web_context(self, web_results: List) -> str:
-        """
-        Formats web results with URL attribution so the LLM
-        can reference sources accurately.
-        """
         lines = []
         for i, result in enumerate(web_results, 1):
             title = result.get("metadata", {}).get("title", "Untitled")
@@ -44,7 +40,7 @@ class ChatLLMNode:
         return "\n\n".join(lines)
 
     # ------------------------------------------------------------------
-    # System prompts — one per context source
+    # System prompts
     # ------------------------------------------------------------------
 
     def _get_system_prompt(self, context_source: str) -> str:
@@ -91,7 +87,7 @@ and web search results are available to answer this question.
     # History filter
     # ------------------------------------------------------------------
 
-    def _filter_history(self, history: List[Dict[str, str]], available_chars: int) -> List[BaseMessage]:
+    def _filter_history(self, history: List[Dict], available_chars: int) -> List[BaseMessage]:
         selected_messages = []
         current_chars = 0
 
@@ -120,21 +116,12 @@ and web search results are available to answer this question.
         """
         Builds context from the appropriate source(s) and generates
         a response using the correct system prompt.
-
-        Reads:
-            state.user_message
-            state.context_source     → which prompt to use
-            state.retrieved_docs     → local doc chunks
-            state.web_search_results → web snippets
-
-        Writes:
-            state.chat_response
         """
 
         context_source = state.context_source or "documents"
 
         # ----------------------------------------------------------
-        # Build context string based on source
+        # Build context string
         # ----------------------------------------------------------
         context_parts = []
 
@@ -159,6 +146,26 @@ and web search results are available to answer this question.
         )
 
         # ----------------------------------------------------------
+        # Trim history before building message list.
+        #
+        # The frontend appends the current user message to chat_history
+        # BEFORE sending the request, so state.chat_history always ends
+        # with the current user message. If we include it in the history
+        # block AND append it again as the final HumanMessage, APIs that
+        # enforce strict user/assistant alternation (e.g. Sarvam) reject
+        # the request with a 400.
+        #
+        # Fix: drop any trailing user messages from history — they will
+        # be represented by the explicit HumanMessage appended below.
+        # This is safe for all providers: Llama on HF was silently
+        # tolerating the duplicate; this makes the behaviour correct
+        # and consistent everywhere.
+        # ----------------------------------------------------------
+        trimmed_history = list(state.chat_history or [])
+        while trimmed_history and trimmed_history[-1].get("role") == "user":
+            trimmed_history.pop()
+
+        # ----------------------------------------------------------
         # History budget
         # ----------------------------------------------------------
         fixed_cost = len(system_prompt_text) + len(user_message_text)
@@ -166,8 +173,8 @@ and web search results are available to answer this question.
 
         messages = [SystemMessage(content=system_prompt_text)]
 
-        if state.chat_history and remaining_chars > 500:
-            history_messages = self._filter_history(state.chat_history, remaining_chars)
+        if trimmed_history and remaining_chars > 500:
+            history_messages = self._filter_history(trimmed_history, remaining_chars)
             messages.extend(history_messages)
 
         messages.append(HumanMessage(content=user_message_text))

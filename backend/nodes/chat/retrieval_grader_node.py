@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from backend.llm.hf_client import get_chat_llm
+from backend.llm.hf_client import get_grader_llm
 
 
 MAX_CONTEXT_CHARS = 2000
@@ -120,9 +120,8 @@ Respond with EXACTLY ONE WORD: correct, incorrect, or ambiguous.
 No explanation. No punctuation. One word only."""
 
     def __init__(self):
-        self.llm = get_chat_llm(
-            max_new_tokens=15,
-            temperature=0.0,
+        self.llm = get_grader_llm(
+            
         )
 
     # ----------------------------------------------------------

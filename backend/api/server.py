@@ -1,7 +1,7 @@
 # Registers chat & workflow APIs
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles                    # Phase 3 — added
+from fastapi.staticfiles import StaticFiles
 
 from backend.api.chat_routes import router as chat_router
 from backend.api.workflow_routes import router as workflow_router
@@ -12,15 +12,12 @@ from backend.db.mongo import MongoDB
 from backend.services.document_store import DocumentStore
 from backend.nodes.chat.local_retriever_node import LocalRetrieverNode
 from backend.nodes.chat.chat_llm_node import ChatLLMNode
-from backend.llm.hf_client import get_chat_llm
+from backend.llm.hf_client import get_llm, validate_llm_providers
 from backend.graph.unified_graph import UnifiedGraph
 import os
 
 INDEX_PATH = "backend/storage/index/index.pkl"
 
-# Absolute path to the shared workspace outputs directory.
-# Port 8001 writes heatmaps/overlays here.
-# Port 8000 serves them as static files so the frontend can render them.
 SHARED_OUTPUTS_DIR = os.path.abspath(
     "./backend/storage/shared_workspace/outputs"
 )
@@ -30,25 +27,7 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# ---------------------------------------------------------
-# Phase 3 — Static file serving
-#
-# Any file under shared_workspace/outputs/ is now reachable at:
-#     http://localhost:8000/outputs/<relative_path>
-#
-# Example:
-#     /outputs/heatmaps/overlays/000001_overlay.jpg
-#     /outputs/heatmaps/heatmap_images/000001_heatmap.jpg
-#
-# The adapter writes URL paths in exactly this format, so the
-# frontend can render them without any path translation.
-#
-# html=False: we are serving images, not an HTML app.
-# check_dir=False: directory may not exist yet on a fresh machine
-#                  (created by the first /build run). Without this,
-#                  FastAPI would raise an error on startup.
-# ---------------------------------------------------------
-os.makedirs(SHARED_OUTPUTS_DIR, exist_ok=True)          # ensure it exists at startup
+os.makedirs(SHARED_OUTPUTS_DIR, exist_ok=True)
 app.mount(
     "/outputs",
     StaticFiles(directory=SHARED_OUTPUTS_DIR, html=False),
@@ -62,10 +41,19 @@ mongodb = MongoDB(
 
 @app.on_event("startup")
 def startup_event():
+    # ------------------------------------------------------------------
+    # Step 1 — Validate LLM provider config before anything else.
+    # This surfaces model availability failures at boot time rather than
+    # on the first user request. Falls back gracefully with a warning if
+    # Sarvam-M is configured but unavailable.
+    # ------------------------------------------------------------------
+    validate_llm_providers()
+
+    # Step 2 — MongoDB
     mongodb.connect()
     app.state.mongodb = mongodb
 
-    # Load document index
+    # Step 3 — Document store
     if os.path.exists(INDEX_PATH):
         print("Loading Document Store...")
         store = DocumentStore.load(INDEX_PATH)
@@ -75,12 +63,14 @@ def startup_event():
 
     app.state.document_store = store
 
-    # Initialize nodes
+    # Step 4 — Nodes and graph
+    # get_llm() is called here via validate_llm_providers() already,
+    # but we call it again explicitly so the node gets a fresh instance
+    # bound to its own reference (not shared with the probe call).
     retriever = LocalRetrieverNode(store)
-    llm = get_chat_llm()
+    llm = get_llm()
     chat_node = ChatLLMNode(llm)
 
-    # Initialize unified graph
     app.state.unified_graph = UnifiedGraph(
         retriever_node=retriever,
         chat_llm_node=chat_node,
